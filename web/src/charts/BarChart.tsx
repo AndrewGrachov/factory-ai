@@ -27,7 +27,9 @@ export function BarChart({
 }: BarChartProps) {
     const innerWidth = width - PAD.left - PAD.right;
     const band = innerWidth / Math.max(labels.length, 1);
-    const barWidth = Math.max(band * 0.7, 1);
+    // Capped, because the chart is fixed-width: a one-week range would otherwise render a
+    // single bar ~580px wide, which reads as a filled panel rather than as one data point.
+    const barWidth = Math.min(Math.max(band * 0.7, 1), 56);
     const bandCentre = (i: number) => PAD.left + band * i + band / 2;
 
     const stackTotals = labels.map((_, i) =>

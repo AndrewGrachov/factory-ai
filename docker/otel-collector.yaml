@@ -1,0 +1,76 @@
+# Why a collector at all, when the server could receive OTLP directly:
+#   - it speaks both grpc (4317) and http (4318), so the agent's protocol choice stops
+#     mattering, and http/json is the least-exercised OTLP encoding;
+#   - it batches and retries across a dashboard restart, so a `docker compose up --build`
+#     does not lose a session's metrics;
+#   - it is a second place to drop anything sensitive, independent of the server's allowlist.
+
+receivers:
+    otlp:
+        protocols:
+            grpc:
+                endpoint: 0.0.0.0:4317
+            http:
+                endpoint: 0.0.0.0:4318
+
+processors:
+    batch:
+        timeout: 5s
+        send_batch_size: 512
+
+    # Defence in depth. The server's ATTR_ALLOWLIST is the real guarantee, but dropping
+    # identity here means it never crosses the container boundary either.
+    attributes/strip-identity:
+        actions:
+            - key: user.email
+              action: delete
+            - key: user.id
+              action: delete
+            - key: user.account_uuid
+              action: delete
+            - key: user.account_id
+              action: delete
+            - key: user.groups
+              action: delete
+            - key: organization.id
+              action: delete
+            - key: workspace.host_paths
+              action: delete
+
+    # Cost is out of scope, so it is refused before it can reach the volume.
+    filter/drop-cost:
+        error_mode: ignore
+        metrics:
+            metric:
+                - 'name == "claude_code.cost.usage"'
+
+exporters:
+    # http/json rather than protobuf: the server's ingest route parses OTLP/JSON, which keeps
+    # the flattener testable with hand-written fixtures and no protobuf toolchain.
+    otlp_http/dashboard:
+        endpoint: http://dashboard:8080/api/otlp
+        encoding: json
+        # Required. The exporter gzips by default, Fastify's JSON parser does not decompress,
+        # and the result is a flat 400 on every export with "Dropping data" in the collector
+        # log. This hop is localhost with kilobyte payloads, so compression buys nothing.
+        compression: none
+        tls:
+            insecure: true
+        retry_on_failure:
+            enabled: true
+            initial_interval: 5s
+            max_elapsed_time: 300s
+
+service:
+    telemetry:
+        logs:
+            level: warn
+    pipelines:
+        metrics:
+            receivers: [otlp]
+            processors: [filter/drop-cost, attributes/strip-identity, batch]
+            exporters: [otlp_http/dashboard]
+        logs:
+            receivers: [otlp]
+            processors: [attributes/strip-identity, batch]
+            exporters: [otlp_http/dashboard]

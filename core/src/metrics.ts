@@ -158,7 +158,8 @@ export function derive(pr: RawPullRequest, bots: Set<string> = defaultBots()): D
 
 // Returns null, not 0, on a zero denominator: the whole unavailable-vs-zero contract
 // on the page rests on this. "0 reverts in 0 commits" reads as a real answer.
-function ratio(part: number, whole: number): number | null {
+// Exported so telemetry.ts shares the one definition rather than growing a second.
+export function ratio(part: number, whole: number): number | null {
     return whole ? part / whole : null;
 }
 

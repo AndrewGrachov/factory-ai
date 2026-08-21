@@ -17,9 +17,13 @@
         "dev:web": "npm run dev -w web",
         "start": "node server/dist/index.js",
         "test": "vitest run",
-        "typecheck": "tsc -b"
+        "test:db": "vitest run --config vitest.db.config.ts",
+        "verify:ui": "playwright test",
+        "typecheck": "tsc -b",
+        "backfill": "npm run build -w core && npm run build -w server && node server/dist/backfill/cli.js"
     },
     "devDependencies": {
+        "@playwright/test": "1.62.1",
         "@types/node": "^24.0.0",
         "concurrently": "^9.1.2",
         "typescript": "^5.7.0",

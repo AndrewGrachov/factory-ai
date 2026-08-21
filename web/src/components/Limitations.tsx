@@ -7,7 +7,34 @@ export function Limitations() {
         <section className="panel">
             <h2>What this cannot tell you</h2>
             <ul className="limits">
-                <li>Nothing about token or API cost, or wall-clock time spent in an AI session.</li>
+                <li>
+                    <strong>
+                        The token and line counts are what the agent wrote, not what survived to
+                        merge.
+                    </strong>{' '}
+                    Claude Code telemetry carries no commit SHA, no PR number and no branch, so
+                    nothing here can say "340 of PR #123's lines are AI-written". The honest reading
+                    is "written during sessions attributed to this branch".
+                </li>
+                <li>
+                    Attribution rests on a hook that samples the current branch roughly every 20
+                    seconds and is allowed to fail silently. A branch held for less than one interval
+                    can be missed, and a session that held several branches is marked{' '}
+                    <em>shared</em> and contributes no per-PR figure at all.
+                </li>
+                <li>
+                    AI usage only covers sessions after the plugin was installed, on machines that
+                    have it. A PR showing no usage is not a PR written without AI.
+                </li>
+                <li>
+                    No monetary cost, deliberately. Prices and cache discounts change, and a dollar
+                    figure would imply precision this attribution cannot support.
+                </li>
+                <li>
+                    The four token types are never summed into one number — a long cached
+                    conversation would count the same context repeatedly — and the counts include
+                    work that was rejected, undone or abandoned.
+                </li>
                 <li>
                     No AI-vs-human share of the diff. There are no{' '}
                     <code>Co-Authored-By: Claude</code> trailers on <code>dev</code>, and the AI

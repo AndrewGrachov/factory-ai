@@ -1,0 +1,15 @@
+{
+    "name": "factory-ai",
+    "description": "Plugins for the Factory Stats dashboard, which correlates AI coding-agent usage with pull request outcomes.",
+    "owner": {
+        "name": "Factory Stats"
+    },
+    "plugins": [
+        {
+            "name": "agent-telemetry",
+            "source": "./plugins/agent-telemetry",
+            "description": "Reports each Claude Code session's git branch to a local Factory Stats dashboard, so AI token usage can be attributed to individual pull requests.",
+            "version": "0.1.0"
+        }
+    ]
+}

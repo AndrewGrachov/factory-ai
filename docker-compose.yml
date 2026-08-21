@@ -13,6 +13,16 @@ services:
             GITHUB_REPO: ${GITHUB_REPO:-leeloo.ai}
             BASE_BRANCH: ${BASE_BRANCH:-dev}
             CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-900}
+            # postgres, not fixture: this file provisions the database AND the collector, so
+            # fixture mode would 404 the ingest route and leave the collector retrying forever.
+            # The code default stays `fixture` for `npm run dev` and the test suite, which have
+            # no database.
+            TELEMETRY_SOURCE: ${TELEMETRY_SOURCE:-postgres}
+            TELEMETRY_TTL_SECONDS: ${TELEMETRY_TTL_SECONDS:-30}
+            DATABASE_URL: postgres://factory:factory@timescale:5432/factory_dev
+        depends_on:
+            timescale:
+                condition: service_healthy
         restart: unless-stopped
         healthcheck:
             # alpine has no curl, so probe with node's global fetch.
@@ -27,3 +37,49 @@ services:
             timeout: 5s
             retries: 3
             start_period: 10s
+
+    # TimescaleDB rather than plain Postgres: metric_point is a real time-series table and
+    # becomes a hypertable, while session_branch stays relational so the attribution join is
+    # ordinary SQL. One extension, one driver, one dialect.
+    timescale:
+        image: timescale/timescaledb:latest-pg17
+        environment:
+            POSTGRES_USER: factory
+            POSTGRES_PASSWORD: factory
+            # Two databases, deliberately. `npm run test:db` truncates its tables, so it is
+            # fenced off to factory_test by a name check in the suite — pointing it at
+            # factory_dev would silently destroy backfilled history.
+            POSTGRES_DB: factory_dev
+        # Localhost-only, same posture as the dashboard: the bind is the access control.
+        # Published because `npm run test:db` and psql both run from the host.
+        ports:
+            - '127.0.0.1:5432:5432'
+        volumes:
+            - timescale-data:/var/lib/postgresql/data
+            # Only runs on a fresh volume, which is why the README also gives the manual
+            # `create database` for an existing one.
+            - ./docker/init-databases.sh:/docker-entrypoint-initdb.d/10-init-databases.sh:ro
+        restart: unless-stopped
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U factory -d factory_dev']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+            start_period: 10s
+
+    # Receives from Claude Code on the host and forwards to the dashboard's ingest route.
+    # Localhost-only, no auth, no TLS — same posture as everything else here.
+    collector:
+        image: otel/opentelemetry-collector-contrib:latest
+        command: ['--config=/etc/otel/config.yaml']
+        volumes:
+            - ./docker/otel-collector.yaml:/etc/otel/config.yaml:ro
+        ports:
+            - '127.0.0.1:4317:4317'
+            - '127.0.0.1:4318:4318'
+        depends_on:
+            - dashboard
+        restart: unless-stopped
+
+volumes:
+    timescale-data:

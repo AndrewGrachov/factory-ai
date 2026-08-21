@@ -25,8 +25,13 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/core/dist core/dist
 COPY --from=build /app/server/dist server/dist
 COPY --from=build /app/web/dist web/dist
-# The fixture backs DATA_SOURCE=fixture, which is how the container runs without a token.
+# The fixtures back DATA_SOURCE=fixture and TELEMETRY_SOURCE=fixture, which is how the
+# container runs with no token, no database and no collector.
 COPY --from=build /app/core/test/fixtures/sample-payload.json core/test/fixtures/sample-payload.json
+COPY --from=build /app/core/test/fixtures/telemetry-sessions.json core/test/fixtures/telemetry-sessions.json
+# tsc does not compile .sql, so the migrations have to be copied by hand. Forgetting this
+# fails only in the container, never in dev.
+COPY --from=build /app/server/migrations server/migrations
 ENV WEB_ROOT=/app/web/dist
 ENV HOST=0.0.0.0
 USER node

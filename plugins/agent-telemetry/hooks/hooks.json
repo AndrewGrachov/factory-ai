@@ -1,0 +1,42 @@
+{
+    "description": "Reports the session's git branch so AI usage can be attributed to a PR",
+    "hooks": {
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-telemetry.mjs\"",
+                        "timeout": 5,
+                        "async": true
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-telemetry.mjs\"",
+                        "timeout": 5,
+                        "async": true
+                    }
+                ]
+            }
+        ],
+        "SessionEnd": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-telemetry.mjs\"",
+                        "timeout": 5,
+                        "async": true
+                    }
+                ]
+            }
+        ]
+    }
+}

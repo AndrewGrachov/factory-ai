@@ -1,13 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Stats } from '@factory-ai/core';
+import type { DateRange, Stats, TelemetryStats } from '@factory-ai/core';
 
 export interface RateLimit {
     remaining: number;
     resetAt: string;
 }
 
+export interface TelemetryMeta {
+    /**
+     * 'empty' arrives with a real TelemetryStats so the panels can render their own
+     * structure — that is how you see a pipeline that is wired but silent. 'unreachable'
+     * and 'disabled' arrive with null.
+     */
+    status: 'ok' | 'empty' | 'unreachable' | 'disabled';
+    reason: string | null;
+    source: 'postgres' | 'fixture';
+    fetchedAt: string | null;
+    ageSeconds: number | null;
+    stale: boolean;
+    repoFilter: string;
+    otherRepoSessions: number;
+    sessionsWithoutHook: number;
+}
+
 export interface StatsPayload {
     stats: Stats;
+    telemetry: TelemetryStats | null;
     meta: {
         fetchedAt: string;
         ageSeconds: number;
@@ -17,6 +35,9 @@ export interface StatsPayload {
         revert: { status: 'ok' | 'unavailable'; reason: string | null };
         repo: { owner: string; name: string };
         baseBranch: string;
+        /** The range the server actually aggregated over, presets already resolved. */
+        range: DateRange;
+        telemetry: TelemetryMeta;
     };
 }
 
@@ -41,7 +62,8 @@ export interface UseStats {
 
 const POLL_MS = 2000;
 
-export function useStats(): UseStats {
+/** `query` is the range query string; changing it re-polls without clearing what is on screen. */
+export function useStats(query = 'range=all'): UseStats {
     const [data, setData] = useState<StatsPayload | null>(null);
     const [progress, setProgress] = useState<FetchState | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -52,7 +74,7 @@ export function useStats(): UseStats {
         try {
             // No client-side timeout: aborting a cold fetch would waste the ~243
             // rate-limit points the server already spent.
-            const response = await fetch('/api/stats', { signal });
+            const response = await fetch(`/api/stats?${query}`, { signal });
 
             if (response.status === 202) {
                 const body = (await response.json()) as { fetch: FetchState };
@@ -82,10 +104,11 @@ export function useStats(): UseStats {
             setError((e as Error).message);
             setPending(false);
         }
-    }, []);
+    }, [query]);
 
     useEffect(() => {
         const controller = new AbortController();
+        setPending(true);
         void poll(controller.signal);
         return () => {
             controller.abort();

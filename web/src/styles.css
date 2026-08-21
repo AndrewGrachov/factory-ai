@@ -1,0 +1,304 @@
+:root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #2a313c;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --primary: #58a6ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+
+h1 {
+    font-size: 20px;
+    margin: 0;
+}
+
+h2 {
+    font-size: 15px;
+    margin: 0 0 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+}
+
+code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    background: #21262d;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.muted {
+    color: var(--muted);
+}
+
+.error {
+    color: var(--bad);
+}
+
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+.topbar p {
+    margin: 4px 0 0;
+}
+
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+button {
+    background: #21262d;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font: inherit;
+    cursor: pointer;
+}
+
+button:hover {
+    border-color: var(--primary);
+}
+
+button:disabled {
+    color: var(--muted);
+    cursor: default;
+    border-color: var(--border);
+}
+
+main {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 1400px;
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.panel p {
+    margin: 0 0 12px;
+    max-width: 68ch;
+}
+
+.panel.warn {
+    border-color: #4a3a12;
+}
+
+.two-up {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+    gap: 20px;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.card strong {
+    font-size: 26px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.card span {
+    font-size: 12px;
+}
+
+.status {
+    color: var(--muted);
+    font-family: var(--mono);
+    margin: 0;
+}
+
+.chart-wrap {
+    overflow-x: auto;
+    margin-bottom: 12px;
+}
+
+.chart {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.grid {
+    stroke: #262c36;
+    stroke-width: 1;
+}
+
+.grid-alt {
+    stroke-dasharray: 2 4;
+}
+
+.tick {
+    fill: var(--muted);
+    font-size: 10px;
+    font-family: var(--mono);
+}
+
+.axis-label {
+    fill: var(--muted);
+    font-size: 10px;
+}
+
+.bar {
+    fill: var(--primary);
+}
+
+.bar-primary {
+    fill: #2f6feb;
+}
+
+.bar-ok {
+    fill: var(--ok);
+}
+
+.bar-warn {
+    fill: var(--warn);
+}
+
+.bar-bad {
+    fill: var(--bad);
+}
+
+.line {
+    fill: none;
+    stroke: var(--warn);
+    stroke-width: 1.5;
+}
+
+.dot {
+    fill: #6e7681;
+    fill-opacity: 0.8;
+}
+
+.dot-warn {
+    fill: var(--warn);
+}
+
+.dot-bad {
+    fill: var(--bad);
+}
+
+table.data {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+
+table.data th,
+table.data td {
+    text-align: left;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+table.data th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+table.data th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+table.data th.asc::after {
+    content: ' ↑';
+}
+
+table.data th.desc::after {
+    content: ' ↓';
+}
+
+table.data td:not(:first-child) {
+    font-family: var(--mono);
+}
+
+.kv {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 2px 16px;
+    margin: 0;
+    font-size: 13px;
+}
+
+.kv dt {
+    color: var(--muted);
+}
+
+.kv dd {
+    margin: 0;
+    font-family: var(--mono);
+}
+
+.limits {
+    margin: 0;
+    padding-left: 20px;
+    max-width: 88ch;
+}
+
+.limits li,
+.panel.warn li {
+    margin-bottom: 6px;
+}
+
+.panel.warn ul {
+    margin: 0;
+    padding-left: 20px;
+    max-width: 88ch;
+}
+
+footer {
+    display: flex;
+    gap: 20px;
+    padding: 12px 24px 32px;
+    font-size: 12px;
+}

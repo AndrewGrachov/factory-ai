@@ -1,0 +1,29 @@
+services:
+    dashboard:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+        # There is no application-level auth, so the localhost bind is the access control.
+        ports:
+            - '127.0.0.1:8080:8080'
+        environment:
+            DATA_SOURCE: ${DATA_SOURCE:-fixture}
+            GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+            GITHUB_OWNER: ${GITHUB_OWNER:-Leeloo-AI-RGA-OS}
+            GITHUB_REPO: ${GITHUB_REPO:-leeloo.ai}
+            BASE_BRANCH: ${BASE_BRANCH:-dev}
+            CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-900}
+        restart: unless-stopped
+        healthcheck:
+            # alpine has no curl, so probe with node's global fetch.
+            test:
+                [
+                    'CMD',
+                    'node',
+                    '-e',
+                    "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+                ]
+            interval: 30s
+            timeout: 5s
+            retries: 3
+            start_period: 10s

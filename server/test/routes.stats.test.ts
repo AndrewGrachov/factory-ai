@@ -54,7 +54,6 @@ describe('GET /api/stats', () => {
         // second endpoint and no mode-specific branch in its markup.
         expect(body.meta.organization.available).toEqual([body.meta.organization.current]);
         expect(body.meta.baseBranch).toBe('dev');
-        expect(body.meta.source).toBe('live');
         expect(body.meta.ageSeconds).toBe(0);
         // truncated lives only on stats.meta, never duplicated into the envelope.
         expect(body.stats.meta.truncated).toEqual([]);
@@ -69,7 +68,8 @@ describe('GET /api/stats', () => {
         await h.settle();
         expect(client.prCalls).toBe(1);
 
-        h.advance(60_000);
+        // Strictly inside the 60s sync TTL. Advancing to exactly the TTL is already stale.
+        h.advance(30_000);
         for (let i = 0; i < 3; i += 1) await app.inject({ method: 'GET', url: '/api/stats' });
         await h.settle();
         expect(client.prCalls).toBe(1);

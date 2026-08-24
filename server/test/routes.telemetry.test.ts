@@ -235,22 +235,30 @@ describe('POST /api/refresh', () => {
 });
 
 describe('loadConfig', () => {
-    it('requires DATABASE_URL for the postgres source', () => {
-        expect(() => loadConfig({ TELEMETRY_SOURCE: 'postgres' })).toThrow(/requires DATABASE_URL/);
-    });
+    // DATABASE_URL is required for every configuration now, so it is a baseline rather than the
+    // subject of any case here.
+    const DB = 'postgres://factory:factory@127.0.0.1:5432/factory_dev';
+    const env = (extra: NodeJS.ProcessEnv = {}) => ({ DATABASE_URL: DB, ...extra });
 
     it('rejects an unknown source', () => {
-        expect(() => loadConfig({ TELEMETRY_SOURCE: 'clickhouse' })).toThrow(/TELEMETRY_SOURCE/);
+        expect(() => loadConfig(env({ TELEMETRY_SOURCE: 'clickhouse' }))).toThrow(/TELEMETRY_SOURCE/);
     });
 
     it('rejects a TTL below the floor', () => {
-        expect(() => loadConfig({ TELEMETRY_TTL_SECONDS: '1' })).toThrow(/at least 5/);
+        expect(() => loadConfig(env({ TELEMETRY_TTL_SECONDS: '1' }))).toThrow(/at least 5/);
     });
 
-    it('defaults to the offline fixture source', () => {
-        const config = loadConfig({});
-        expect(config.telemetrySource).toBe('fixture');
+    it('defaults to the postgres source, since there is always a database', () => {
+        // It used to default to `fixture` so that `npm run dev` and the test suite needed neither
+        // a database nor a collector. Both now have a database by construction, and a fixture
+        // default would 404 the ingest route against a collector that is already exporting.
+        const config = loadConfig(env());
+        expect(config.telemetrySource).toBe('postgres');
         expect(config.telemetryTtlMs).toBe(30_000);
         expect(config.repoNames).toEqual(['Leeloo-AI-RGA-OS/leeloo.ai']);
+    });
+
+    it('still defaults the organization, which nothing here should have changed', () => {
+        expect(loadConfig(env()).orgId).toBe('default');
     });
 });

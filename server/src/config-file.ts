@@ -16,7 +16,6 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     'organization.id': { env: 'ORG_ID', kind: 'string' },
     'organization.name': { env: 'ORG_NAME', kind: 'string' },
     'organization.repos': { env: 'ORG_REPOS', kind: 'list' },
-    'github.source': { env: 'DATA_SOURCE', kind: 'string' },
     'github.token': { env: 'GITHUB_TOKEN', kind: 'string' },
     'github.owner': { env: 'GITHUB_OWNER', kind: 'string' },
     'github.base_branch': { env: 'BASE_BRANCH', kind: 'string' },
@@ -24,7 +23,6 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     'server.port': { env: 'PORT', kind: 'int' },
     'server.host': { env: 'HOST', kind: 'string' },
     'server.web_root': { env: 'WEB_ROOT', kind: 'string' },
-    'cache.ttl_seconds': { env: 'CACHE_TTL_SECONDS', kind: 'int' },
     'cache.sync_ttl_seconds': { env: 'SYNC_TTL_SECONDS', kind: 'int' },
     'telemetry.source': { env: 'TELEMETRY_SOURCE', kind: 'string' },
     'telemetry.database_url': { env: 'DATABASE_URL', kind: 'string' },
@@ -38,8 +36,25 @@ const SECTIONS = [...new Set(Object.keys(KEYS).map((path) => path.split('.')[0])
  * to name the new location: "unknown key github.repos" reads as a typo in something that
  * demonstrably worked yesterday, and the reader's next move is to type it again.
  */
-const MOVED: Record<string, string> = {
-    'github.repos': 'organization.repos',
+const MOVED: Record<string, { readonly to: string; readonly why: string }> = {
+    'github.repos': {
+        to: 'organization.repos',
+        why: 'the organization owns the repo list now',
+    },
+    'cache.ttl_seconds': {
+        to: 'cache.sync_ttl_seconds',
+        why: 'refreshes are incremental now that history is always persisted, so the 300s-per-repo full-walk floor no longer applies',
+    },
+};
+
+/**
+ * Keys that are gone with nowhere to go. Same reasoning as MOVED — a key that worked yesterday
+ * needs its removal explained, not reported as a typo — but these need the replacement *workflow*
+ * named rather than a new key name.
+ */
+const REMOVED: Record<string, string> = {
+    'github.source':
+        'the database is the only source the dashboard reads. For data without a GitHub token, seed a disposable database: npm run seed',
 };
 
 export interface FileConfig {
@@ -103,14 +118,14 @@ function flatten(parsed: Record<string, unknown>, path: string): FileConfig {
             const tomlPath = `${section}.${key}`;
             const spec = KEYS[tomlPath];
             // Fatal, unlike an unrecognised environment variable. A config file has a closed key
-            // set, so a typo there is a typo — and a tolerated `tokenn` boots silently on
-            // fixture data, which is indistinguishable from having no token at all.
+            // set, so a typo there is a typo — and a tolerated `tokenn` boots a dashboard whose
+            // operator believes it is authenticated.
             if (!spec) {
+                const removed = REMOVED[tomlPath];
+                if (removed) throw new Error(`${path}: ${tomlPath} is no longer supported — ${removed}.`);
                 const moved = MOVED[tomlPath];
                 if (moved) {
-                    throw new Error(
-                        `${path}: ${tomlPath} has moved to ${moved} — the organization owns the repo list now. Move the line into an [organization] table and give the organization an id and a name:\n\n    [organization]\n    id = "acme"\n    name = "Acme"\n    repos = [...]\n`,
-                    );
+                    throw new Error(`${path}: ${tomlPath} has moved to ${moved.to} — ${moved.why}.`);
                 }
                 throw new Error(`${path}: unknown key ${tomlPath}`);
             }
@@ -170,13 +185,7 @@ export function readConfigFile(options: ReadOptions = {}): FileConfig | null {
     }
     if (stat.isDirectory()) throw new Error(`${found.path} is a directory, not a config file`);
 
-    if (stat.mode & 0o077) {
-        // Warn rather than throw: the file may legitimately hold no secret, and refusing to boot
-        // over a permission bit would be worse than the risk it flags.
-        warn(
-            `[config] ${found.path} is readable by other users (mode ${(stat.mode & 0o777).toString(8)}) and may hold a GitHub token — chmod 600 it`,
-        );
-    }
+    const permissive = Boolean(stat.mode & 0o077);
 
     let text;
     try {
@@ -203,7 +212,19 @@ export function readConfigFile(options: ReadOptions = {}): FileConfig | null {
         throw error;
     }
 
-    return flatten(parsed as Record<string, unknown>, found.path);
+    const config = flatten(parsed as Record<string, unknown>, found.path);
+
+    // Warned rather than thrown: refusing to boot over a permission bit would be worse than the
+    // risk it flags. Conditioned on the file actually carrying a token, because the committed
+    // e2e config declares none and is necessarily mode 644 — and a warning that fires on a file
+    // with no secret in it is how people learn to ignore the ones that matter.
+    if (permissive && config.values.GITHUB_TOKEN) {
+        warn(
+            `[config] ${found.path} is readable by other users (mode ${(stat.mode & 0o777).toString(8)}) and holds a GitHub token — chmod 600 it`,
+        );
+    }
+
+    return config;
 }
 
 export function mergeSources(file: FileConfig | null, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

@@ -6,7 +6,6 @@ import { createPrStore } from './db/pr-store.js';
 import { createPostgresTelemetryClient } from './telemetry/postgres-client.js';
 import { createPostgresStore } from './telemetry/store.js';
 import { createGitHubClient } from './github/client.js';
-import { createFixtureClient } from './github/fixture-client.js';
 import { envTokenProvider } from './github/token.js';
 import { createStatsService } from './stats-service.js';
 import { createFixtureTelemetryClient, createNullTelemetryClient } from './telemetry/fixture-client.js';
@@ -19,68 +18,44 @@ console.log(`[config] ${source ?? 'no config file; environment only'}`);
 // an unexpected one is otherwise silent — the dashboard renders empty and looks like data loss.
 console.log(`[org] ${config.orgName} (${config.orgId})`);
 
-const client =
-    config.dataSource === 'fixture'
-        ? // Stamped with the first configured repo so the fixture agrees with the config it is
-          // standing in for. The payload itself came from one capture, so one name is honest.
-          // loadConfig rejects an empty repo list, so index 0 always exists.
-          createFixtureClient({ repo: config.repoNames[0] as string })
-        : createGitHubClient({ config, tokens: envTokenProvider(env) });
-
-/**
- * One pool for both the telemetry store and the PR store, and one `migrate()` for both. They are
- * independent features but they share a schema, and two runners would race each other.
- */
-function buildDatabase() {
-    if (config.persistence === 'off' && config.telemetrySource !== 'postgres') return null;
-    if (!config.databaseUrl) return null;
-
-    const sql = postgres(config.databaseUrl, { max: 4 });
-    // NOT awaited. Migrations retry with backoff for the better part of a minute while the
-    // database container starts, and blocking on them here would hold the whole dashboard —
-    // including the PR metrics, which need no database at all — hostage to it. Every consumer
-    // gates its own queries on `ready` and reports unavailable until then.
-    // orgId is required: migrate() also adopts pre-organization rows into it, and that adoption is
-    // the only thing standing between a warm database and an empty dashboard.
-    const ready = migrate(sql, { orgId: config.orgId, log: (m) => console.log(`[migrate] ${m}`) });
-    ready.catch((e: Error) => console.error(`[migrate] giving up: ${e.message}`));
-    return { sql, ready };
-}
-
-function buildTelemetry(db: { sql: postgres.Sql; ready: Promise<void> } | null) {
-    if (config.telemetrySource === 'off') {
-        return { telemetry: createNullTelemetryClient(), store: undefined };
-    }
-    if (config.telemetrySource === 'fixture') {
-        // No store: without a database there is nowhere to put an export, and a route that
-        // accepts data it then drops is worse than no route at all.
-        return { telemetry: createFixtureTelemetryClient(), store: undefined };
-    }
-
-    const { sql, ready } = db as { sql: postgres.Sql; ready: Promise<void> };
-    return {
-        telemetry: createPostgresTelemetryClient({ sql, orgId: config.orgId, ready }),
-        store: createPostgresStore({ sql, orgId: config.orgId }),
-    };
-}
-
-const db = buildDatabase();
-const { telemetry, store } = buildTelemetry(db);
-
-// Fixture data is never persisted, and there is no flag that says otherwise. DATA_SOURCE
-// defaults to fixture while docker-compose sets DATABASE_URL unconditionally, so the default
-// path is precisely the one that would write 203 synthetic PRs into real history.
-const prStore =
-    config.persistence === 'postgres' && db
-        ? createPrStore({ sql: db.sql, orgId: config.orgId, ready: db.ready })
-        : undefined;
+// A token is optional. Without one this process does not fetch — envTokenProvider throws before a
+// request is ever built — and the dashboard serves whatever is already stored, reporting the fetch
+// failure in `meta` rather than pretending. That is what lets a seeded database be browsed with no
+// credentials and no network.
+const client = createGitHubClient({ config, tokens: envTokenProvider(env) });
 console.log(
-    prStore
-        ? '[persist] pull requests persisted to the configured database'
-        : config.databaseUrl && config.dataSource === 'fixture'
-          ? `[persist] disabled: DATA_SOURCE=fixture, nothing written to ${config.databaseUrl.replace(/\/\/[^@]*@/, '//')}`
-          : '[persist] disabled: no DATABASE_URL, a restart re-fetches everything',
+    env.GITHUB_TOKEN
+        ? '[fetch] syncing from GitHub'
+        : '[fetch] no GITHUB_TOKEN: serving stored data only, nothing will be fetched',
 );
+
+// One pool, and one `migrate()`, for both the telemetry store and the PR store. They are
+// independent features sharing a schema, and two runners would race each other.
+const sql = postgres(config.databaseUrl, { max: 4 });
+// NOT awaited. Migrations retry with backoff for the better part of a minute while the database
+// container starts, and blocking here would hold the whole dashboard hostage to it. Every consumer
+// gates its own queries on `ready` and reports unavailable until then.
+//
+// orgId is required: migrate() also adopts pre-organization rows into it, and that adoption is the
+// only thing standing between a warm database and an empty dashboard.
+const ready = migrate(sql, { orgId: config.orgId, log: (m) => console.log(`[migrate] ${m}`) });
+ready.catch((e: Error) => console.error(`[migrate] giving up: ${e.message}`));
+
+// `off` is a product choice — render no AI panels — not a way to avoid the database, which is why
+// it survives while the fixture source did not.
+const telemetry =
+    config.telemetrySource === 'off'
+        ? createNullTelemetryClient()
+        : config.telemetrySource === 'fixture'
+          ? createFixtureTelemetryClient()
+          : createPostgresTelemetryClient({ sql, orgId: config.orgId, ready });
+
+// The ingest route is registered off this, so it exists whenever there is somewhere to put an
+// export — which is now always, unless telemetry is switched off outright.
+const store = config.telemetrySource === 'postgres' ? createPostgresStore({ sql, orgId: config.orgId }) : undefined;
+
+const prStore = createPrStore({ sql, orgId: config.orgId, ready });
+console.log(`[persist] ${config.databaseUrl.replace(/\/\/[^@]*@/, '//')}`);
 
 const service = createStatsService({ config, client, telemetry, store: prStore });
 const app = await buildApp({ config, service, store, logger: true });

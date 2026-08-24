@@ -20,27 +20,38 @@ simplifying one silently makes the number wrong.
 
 ## Running it
 
+A database is required: it is the only source the dashboard reads. A GitHub token is not — without
+one nothing is fetched and whatever is already stored still renders.
+
 ```bash
 npm install
+docker compose up -d timescale        # required; there is no in-memory mode
 
-# Fixture mode: the committed 203-PR payload, no token, no rate-limit cost.
+# No token: fill a disposable database with synthetic data and browse that.
+docker compose exec timescale psql -U factory -d postgres -c 'create database factory_seed'
+DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run seed
+DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run dev
+
+# Live, via the config file
+cp factory.toml.example factory.toml && chmod 600 factory.toml   # set github.token
 npm run dev
 
-# Live mode, via the config file
-cp factory.toml.example factory.toml && chmod 600 factory.toml   # set github.source and github.token
+# Live, via the environment instead — it overrides factory.toml wherever they disagree
+cp .env.example .env   # set GITHUB_TOKEN
 npm run dev
 
 # The organization owns the repo list, and every repo it lists is reported combined on one page.
-# Cost is ~243 rate-limit points per repo, so the cache TTL floor rises to 300s x the repo count.
+# Cost is ~243 rate-limit points per repo, so the sync TTL floor rises to 60s x the repo count.
 #   [organization]
 #   id    = "leeloo"
 #   name  = "Leeloo AI"
 #   repos = ["leeloo.ai", "leeloo-infra"]
-
-# Live mode, via the environment instead — it overrides factory.toml wherever they disagree
-cp .env.example .env   # set DATA_SOURCE=github and GITHUB_TOKEN
-npm run dev
 ```
+
+A database whose name ends in `_test`, `_seed`, `_synthetic`, `_demo` or `_e2e` is treated as
+disposable, and is refused outright if a token is also set — `npm run seed` writes invented pull
+requests into one and `npm run test:db` truncates one, so real fetched history put there is either
+counterfeited or destroyed.
 
 `npm run dev` starts the API on `127.0.0.1:8080` and Vite on `5173` with `/api` proxied.
 

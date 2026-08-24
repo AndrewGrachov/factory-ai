@@ -54,7 +54,7 @@ export function TopBar({
                     {meta
                         ? `data as of ${new Date(meta.fetchedAt).toLocaleString()}${
                               meta.stale ? ' (stale)' : ''
-                          }${meta.source === 'fixture' ? ' — fixture data' : ''}`
+                          }`
                         : ''}
                 </span>
                 <button type="button" onClick={onRefresh} disabled={refreshing}>

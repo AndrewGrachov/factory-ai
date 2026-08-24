@@ -30,7 +30,6 @@ export interface StatsPayload {
         fetchedAt: string;
         ageSeconds: number;
         stale: boolean;
-        source: 'live' | 'fixture';
         rateLimit: RateLimit | null;
         revert: { status: 'ok' | 'unavailable'; reason: string | null };
         /**

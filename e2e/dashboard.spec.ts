@@ -105,9 +105,11 @@ test.describe('date range selector', () => {
 
         // The scope has to be stated, or a narrowed range reads as a shrinking repository.
         await expect(page.getByText('Every figure above covers')).toBeVisible();
-        // The revert rate cannot be re-sliced, so it degrades alone rather than showing a
-        // full-window figure beside range-scoped metrics.
-        await expect(page.getByText('Revert rate unavailable')).toBeVisible();
+        // The revert rate IS re-sliceable now, because base-branch commits are persisted and this
+        // range sits inside what the scan covers. It used to degrade here — that was the no-store
+        // path, where there were no commit rows to slice and a full-window figure beside
+        // range-scoped metrics would have been a lie.
+        await expect(page.getByText('Revert rate unavailable')).toHaveCount(0);
     });
 
     test('the custom picker applies both bounds and shows all time until one is set', async ({

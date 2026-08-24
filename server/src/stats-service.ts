@@ -49,13 +49,15 @@ export interface TelemetryMeta {
 
 export interface PersistenceMeta {
     /**
-     * 'off'         — no store configured, so a restart re-pays the full fetch.
-     * 'migrating'   — a store exists but its schema is not ready yet. Distinct from
-     *                 'unavailable' because it resolves itself and wants no operator action.
-     * 'unavailable' — the store is configured and failing. PR metrics keep working.
+     * 'migrating'   — the schema is not ready yet. Distinct from 'unavailable' because it
+     *                 resolves itself and wants no operator action.
+     * 'unavailable' — the database is failing. Whatever was already cached keeps rendering.
      * 'ok'          — reads and writes are landing.
+     *
+     * There is no 'off': the database is the only source, so a deployment without one does not
+     * boot at all rather than serving a page that quietly forgets everything on restart.
      */
-    status: 'ok' | 'unavailable' | 'migrating' | 'off';
+    status: 'ok' | 'unavailable' | 'migrating';
     reason: string | null;
     /** When the last successful sync ran, from the store rather than from this process. */
     lastSyncAt: string | null;
@@ -83,7 +85,7 @@ export interface StatsSnapshot {
     derived: DerivedPr[];
     /** The all-time figure as the provider reported it. `commits` is its totalCount, not a row count. */
     history: BranchHistory | null;
-    /** Empty without a store; the revert rate then degrades on a narrowed range, as before. */
+    /** Empty until a base-branch scan has landed; the revert rate degrades on a narrowed range. */
     commits: CommitPoint[];
     coverage: CoveragePoint[];
     rateLimit: RateLimit | null;
@@ -120,7 +122,6 @@ export interface StatsPayload {
         fetchedAt: string;
         ageSeconds: number;
         stale: boolean;
-        source: 'live' | 'fixture';
         rateLimit: RateLimit | null;
         revert: RevertStatus;
         /**
@@ -157,8 +158,12 @@ export interface StatsServiceDeps {
     config: AppConfig;
     client: ForgeClient;
     telemetry: TelemetryClient;
-    /** Absent when persistence is off, exactly as the telemetry store is. */
-    store?: PrStore | undefined;
+    /**
+     * Required. Every figure on the page is read back out of it, so there is no configuration in
+     * which it is absent — and therefore no `if (!store)` branch anywhere below, which used to be
+     * the second, silent behaviour of this service.
+     */
+    store: PrStore;
     now?: () => number;
 }
 
@@ -251,7 +256,7 @@ export function createStatsService({
     let lastFailureAt: number | null = null;
     let telemetryFailure: { at: number; reason: string } | null = null;
     let persistence: PersistenceMeta = {
-        status: store ? 'migrating' : 'off',
+        status: 'migrating',
         reason: null,
         lastSyncAt: null,
         mode: null,
@@ -264,7 +269,6 @@ export function createStatsService({
      * mistake TELEMETRY_COOLDOWN_MS exists to prevent.
      */
     async function tryStore<T>(what: string, run: (s: PrStore) => Promise<T>): Promise<T | null> {
-        if (!store) return null;
         try {
             const value = await run(store);
             if (persistence.status !== 'ok') {
@@ -300,8 +304,6 @@ export function createStatsService({
     }
 
     function chooseMode(state: Record<string, SyncState>): SyncMode {
-        if (!store) return 'full';
-
         const missing = repoNames.filter((repo) => !state[repo]?.watermarkAt);
         // A repo with no watermark has never completed a walk, so there is nothing to be
         // incremental about.
@@ -396,7 +398,8 @@ export function createStatsService({
             });
 
             // An incremental walk returns only what changed, so the full set comes from the
-            // store. Without one, what was just fetched is all there is.
+            // store. `?? prs` is the degraded-database fallback, not a no-store one: a failed
+            // read leaves this pass showing only what just changed rather than nothing at all.
             const stored = await tryStore('read pull requests', (s) =>
                 s.loadPullRequests(client.provider, repoNames),
             );
@@ -411,12 +414,7 @@ export function createStatsService({
                 finishedAt: new Date(now()).toISOString(),
             };
             lastFailureAt = null;
-            // Only when there is somewhere for it to have been synced *to*. Reporting a
-            // lastSyncAt beside status 'off' reads as "persisted at 07:18", which is the one
-            // thing that did not happen.
-            if (store) {
-                persistence = { ...persistence, mode, lastSyncAt: new Date(now()).toISOString() };
-            }
+            persistence = { ...persistence, mode, lastSyncAt: new Date(now()).toISOString() };
             return snapshotFrom(all, commits, coverage, history, revert, rateLimit);
         } catch (e) {
             const code = e instanceof GitHubError ? e.code : 'UNKNOWN';
@@ -446,10 +444,7 @@ export function createStatsService({
         coverage: CoveragePoint[];
         revert: RevertStatus;
     }> {
-        // Without a store there is nothing to resume from: the scan is bounded by the earliest
-        // merge every time, exactly as it was before any of this existed. Accumulating in memory
-        // instead would make the window depend on process uptime.
-        const persistedCommits = store ? (previous?.commits ?? []) : [];
+        const persistedCommits = previous?.commits ?? [];
         const merges = all.map((pr) => pr.mergedAt).filter((at): at is string => at !== null);
         const earliest = merges.length ? merges.reduce((min, at) => (at < min ? at : min)) : null;
 
@@ -585,12 +580,10 @@ export function createStatsService({
         }
     }
 
-    // The floor on CACHE_TTL_SECONDS protects a full walk's ~243 points per repo. Once history is
-    // persisted the ordinary refresh is an incremental walk of a few pages, so it gets a much
-    // shorter TTL — and the full walk it may escalate to is gated by its own schedule and by the
-    // remaining budget, not by this.
-    const ttlMs = store ? config.syncTtlMs : config.cacheTtlMs;
-    const cache = createCache<StatsSnapshot>({ ttlMs, produce, now });
+    // One TTL, because history is always persisted: the ordinary refresh is an incremental walk of
+    // a few pages, and the full walk it may escalate to is gated by its own 24h schedule and by
+    // the remaining rate-limit budget rather than by any clock here.
+    const cache = createCache<StatsSnapshot>({ ttlMs: config.syncTtlMs, produce, now });
     // A second slot with its own TTL. Sharing the PR slot would hide a session that just
     // finished for as long as that slot lives, and its floor exists to protect a rate-limit
     // budget this query does not spend.
@@ -718,7 +711,6 @@ export function createStatsService({
 
     return {
         async prime() {
-            if (!store) return;
             if (priming) return priming;
 
             priming = (async () => {
@@ -812,7 +804,6 @@ export function createStatsService({
                     fetchedAt: new Date(entry.fetchedAt).toISOString(),
                     ageSeconds: Math.floor((now() - entry.fetchedAt) / 1000),
                     stale: cache.isStale(),
-                    source: config.dataSource === 'fixture' ? 'fixture' : 'live',
                     rateLimit: snapshot.rateLimit,
                     revert,
                     organization: {

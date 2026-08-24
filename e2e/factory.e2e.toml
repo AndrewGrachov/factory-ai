@@ -1,0 +1,21 @@
+# Config for `npm run verify:ui`. Committed, unlike factory.toml, because the browser check has to
+# mean the same thing on every machine.
+#
+# playwright.config.ts points FACTORY_CONFIG here, which stops the upward discovery walk from
+# finding a developer's personal factory.toml at the repo root. That matters for one key in
+# particular: an EMPTY environment variable is not an override, so `GITHUB_TOKEN=''` in the
+# playwright env would NOT clear a token set in a personal file — and a token would make this run
+# fetch from GitHub and then refuse to boot against a disposable database. Absence has to come from
+# the file layer, not from the environment.
+#
+# Everything else the run needs (DATABASE_URL, ORG_ID, ORG_NAME) is set in playwright.config.ts,
+# where environment beats this file.
+
+[organization]
+repos = ["leeloo.ai"]
+
+[github]
+# No `token` key at all. Without one the process never fetches, and the page renders purely from
+# the synthetic rows `npm run seed` wrote.
+owner = "Leeloo-AI-RGA-OS"
+base_branch = "dev"

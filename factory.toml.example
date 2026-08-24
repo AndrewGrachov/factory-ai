@@ -30,15 +30,15 @@ name = "Acme Inc"
 # several GitHub owners. A Factory organization is not a GitHub organization, and this `id` has
 # nothing to do with `github.owner`.
 #
-# Cost scales: a full fetch is ~243 rate-limit points PER repo against a 5000/hour budget, so the
-# cache TTL floor below is multiplied by the number of repos listed.
+# Cost scales: a full reconciliation is ~243 rate-limit points PER repo against a 5000/hour budget,
+# so the sync TTL floor below is multiplied by the number of repos listed.
 repos = ["leeloo.ai"]
 
 [github]
-# `github` hits the live API; `fixture` serves the committed 203-PR payload with no token.
-source = "fixture"
-
-# Fine-grained PAT. Required scopes:
+# Fine-grained PAT. OPTIONAL: without one the dashboard never fetches and serves whatever is
+# already in the database. That is how the browser check and a seeded demo run — see `npm run seed`.
+#
+# Required scopes when you do set it:
 #   Metadata: read
 #   Pull requests: read
 #   Contents: read   <- only for the revert rate; without it that one metric reports "unavailable"
@@ -58,21 +58,22 @@ port = 8080
 host = "127.0.0.1"
 
 [cache]
-# The floor for a full walk of every PR: ~243 rate-limit points and ~45s per repo, so 300.
-ttl_seconds = 900
-
-# The floor once PR data is persisted and syncs have gone incremental — a few pages rather than a
-# full walk, so 60 per repo. The expensive full reconciliation is not gated by this: it runs daily
-# and refuses to start unless the remaining rate-limit budget actually covers it.
+# The only cache floor. History is always persisted, so the ordinary refresh is an incremental walk
+# of a few pages rather than a full one — 60 per repo. The expensive full reconciliation is not
+# gated by this: it runs daily and refuses to start unless the remaining rate-limit budget actually
+# covers it. (`ttl_seconds` is gone, and setting it is a hard error rather than being ignored.)
 sync_ttl_seconds = 60
 
 [telemetry]
 # `postgres` reports real sessions; `fixture` serves synthetic numbers the UI badges as such;
 # `off` renders no AI panels at all.
-source = "fixture"
+source = "postgres"
 
-# Required by source = "postgres".
-database_url = ""
+# REQUIRED, always — the database is the only source the dashboard reads, for pull requests as well
+# as telemetry. A name ending in _test/_seed/_synthetic/_demo/_e2e is treated as disposable and is
+# refused whenever a token is also set, because `npm run seed` and `npm run test:db` both destroy
+# or counterfeit whatever is in one.
+database_url = "postgres://factory:factory@127.0.0.1:5432/factory_dev"
 
-# No quota to protect here, only a hot loop to prevent, so the floor is 5 rather than 300.
+# No quota to protect here, only a hot loop to prevent, so the floor is 5 rather than 60.
 ttl_seconds = 30

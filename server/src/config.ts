@@ -1,19 +1,10 @@
 import { DEFAULT_BOTS } from '@factory-ai/core';
 import type { TelemetrySource } from './telemetry/client.js';
 
-export type DataSource = 'github' | 'fixture';
-
 export interface Repo {
     readonly owner: string;
     readonly name: string;
 }
-
-/**
- * Whether fetched PR data is persisted. Derived from `databaseUrl` and `dataSource`, never
- * configured: a second switch is a second source of truth, and the one thing it could express
- * that the derivation cannot is "persist the fixture", which must stay inexpressible.
- */
-export type PersistenceMode = 'postgres' | 'off';
 
 export interface AppConfig {
     /**
@@ -28,21 +19,26 @@ export interface AppConfig {
     readonly repos: readonly Repo[];
     readonly baseBranch: string;
     readonly bots: readonly string[];
-    readonly cacheTtlMs: number;
     /**
-     * The slot TTL used once data is persisted and syncs have gone incremental. An incremental
-     * sync is a few pages, not a full walk, so it does not need the 300s-per-repo floor below —
-     * and the full walk it might escalate to is gated on its own schedule and on the remaining
-     * budget, not on this.
+     * The cache slot's TTL.
+     *
+     * There is only one, because history is always persisted now: the ordinary refresh is an
+     * incremental walk of a few pages, so it needs the cheap 60s-per-repo floor rather than the
+     * 300s-per-repo one a full walk demanded. The expensive full walk it may escalate to is not
+     * gated by any TTL — it runs on its own 24h schedule and refuses to start unless the
+     * provider's reported remaining budget actually covers it, which is strictly stronger than
+     * inferring affordability from a clock.
      */
     readonly syncTtlMs: number;
-    readonly persistence: PersistenceMode;
     readonly port: number;
     readonly host: string;
-    readonly dataSource: DataSource;
     readonly webRoot: string | null;
     readonly telemetrySource: TelemetrySource;
-    readonly databaseUrl: string | null;
+    /**
+     * Required. The database is the only place figures come from, so there is no mode that runs
+     * without one, and therefore no `null` to branch on at 30-odd call sites.
+     */
+    readonly databaseUrl: string;
     readonly telemetryTtlMs: number;
     /**
      * "owner/name" for each configured repo — the form the hook reports and the form stamped onto
@@ -52,14 +48,8 @@ export interface AppConfig {
     readonly repoNames: readonly string[];
 }
 
-// A full fetch costs ~243 rate-limit points and ~45s against a 5000/hour budget, so a
-// short TTL would let a handful of reloads exhaust the quota. Per repo, because the cost is
-// paid once per repo: the floor has to scale with the list or the guard weakens as repos are
-// added, which is exactly when it matters most.
-const MIN_TTL_SECONDS_PER_REPO = 300;
-
-// Not a typo next to the 300s above: the reasons are opposite. A telemetry read is a local
-// query with no quota to protect, so the floor exists only to stop a hot loop.
+// A telemetry read is a local query with no quota to protect, so this floor exists only to stop a
+// hot loop — unlike the sync floor below, which is rationing a rate-limit budget.
 const MIN_TELEMETRY_TTL_SECONDS = 5;
 
 // An incremental sync is ~2-5 pages, so ~5-10 points: 60s per repo costs ~600 points/hour/repo,
@@ -67,8 +57,11 @@ const MIN_TELEMETRY_TTL_SECONDS = 5;
 // expensive full walk is not gated by this at all — see FULL_RESYNC_INTERVAL_MS.
 const MIN_SYNC_TTL_SECONDS_PER_REPO = 60;
 
-/** A database whose name ends here is disposable: the db test suite truncates it. */
-const TEST_DATABASE = /_test$/;
+/**
+ * A database whose name ends here is disposable — the db suite truncates it, and `npm run seed`
+ * fills it with synthetic pull requests. Either would destroy or counterfeit real history.
+ */
+const DISPOSABLE_DATABASE = /_(test|seed|synthetic|demo|e2e)$/;
 
 /**
  * The organization id when nothing sets one.
@@ -117,12 +110,15 @@ function int(raw: string | undefined, fallback: number, label: string): number {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-    const dataSource = (env.DATA_SOURCE ?? 'fixture') as DataSource;
-    if (dataSource !== 'github' && dataSource !== 'fixture') {
-        throw new Error(`DATA_SOURCE must be "github" or "fixture", got "${env.DATA_SOURCE}"`);
-    }
-    if (dataSource === 'github' && !env.GITHUB_TOKEN) {
-        throw new Error('DATA_SOURCE=github requires GITHUB_TOKEN');
+    // DATA_SOURCE selected between the live API and a replayed 203-PR payload. It is gone, and
+    // fatal rather than ignored for the same reason GITHUB_REPOS is: it used to change what the
+    // whole page was made of, so an ignored one would boot a dashboard the operator believes is
+    // showing something else. Synthetic data now arrives by seeding a disposable database
+    // (`npm run seed`), where it is at least visible as rows somebody chose to write.
+    if (env.DATA_SOURCE) {
+        throw new Error(
+            `DATA_SOURCE is no longer supported (got "${env.DATA_SOURCE}"). The database is the only source the dashboard reads. For data without a GitHub token, seed a disposable database: npm run seed.`,
+        );
     }
 
     const owner = env.GITHUB_OWNER ?? 'Leeloo-AI-RGA-OS';
@@ -169,22 +165,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         return { owner: entryOwner, name: entryName };
     });
 
-    const minTtlSeconds = MIN_TTL_SECONDS_PER_REPO * repos.length;
-    const ttlSeconds = int(env.CACHE_TTL_SECONDS, Math.max(900, minTtlSeconds), 'CACHE_TTL_SECONDS');
-    if (ttlSeconds < minTtlSeconds) {
+    // CACHE_TTL_SECONDS floored the slot at 300s per repo because every refresh was a full walk.
+    // With history always persisted, the ordinary refresh is incremental and SYNC_TTL_SECONDS is
+    // the only floor there is. Fatal rather than ignored: a deployment that had raised it to
+    // protect its quota would otherwise silently drop to a 60s floor.
+    if (env.CACHE_TTL_SECONDS) {
         throw new Error(
-            `CACHE_TTL_SECONDS must be at least ${minTtlSeconds} for ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}; a full fetch costs ~243 rate-limit points per repo`,
+            'CACHE_TTL_SECONDS is no longer supported: refreshes are incremental now, so SYNC_TTL_SECONDS is the only cache floor. Rename it, or move the line to cache.sync_ttl_seconds in factory.toml.',
         );
     }
 
-    const telemetrySource = (env.TELEMETRY_SOURCE ?? 'fixture') as TelemetrySource;
+    const telemetrySource = (env.TELEMETRY_SOURCE ?? 'postgres') as TelemetrySource;
     if (!['postgres', 'fixture', 'off'].includes(telemetrySource)) {
         throw new Error(
             `TELEMETRY_SOURCE must be "postgres", "fixture", or "off", got "${env.TELEMETRY_SOURCE}"`,
         );
-    }
-    if (telemetrySource === 'postgres' && !env.DATABASE_URL) {
-        throw new Error('TELEMETRY_SOURCE=postgres requires DATABASE_URL');
     }
 
     const telemetryTtlSeconds = int(env.TELEMETRY_TTL_SECONDS, 30, 'TELEMETRY_TTL_SECONDS');
@@ -200,15 +195,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         );
     }
 
-    const databaseUrl = env.DATABASE_URL ?? null;
-    // Fixture data is never persisted, and there is no flag to make it so. DATA_SOURCE defaults
-    // to fixture and docker-compose sets DATABASE_URL unconditionally, so the default path is
-    // exactly the one that would write 203 synthetic PRs into real history. The *_test guard in
-    // the db suite exists because that class of mistake is silent; this is its mirror.
-    const persistence: PersistenceMode = databaseUrl && dataSource !== 'fixture' ? 'postgres' : 'off';
-    if (persistence === 'postgres' && TEST_DATABASE.test(databaseName(databaseUrl as string) ?? '')) {
+    const databaseUrl = env.DATABASE_URL;
+    if (!databaseUrl) {
         throw new Error(
-            `DATABASE_URL points at "${databaseName(databaseUrl as string)}", which the db test suite truncates. Persisting real fetched history there loses it on the next test run.`,
+            'DATABASE_URL is required: the database is the only source the dashboard reads. Start one with `docker compose up -d timescale`, then either let it sync from GitHub or seed it with `npm run seed`.',
+        );
+    }
+
+    /*
+     * A missing token is a supported state, not an error.
+     *
+     * It means this process does not fetch: it serves whatever is already in the database. That is
+     * what lets the browser check and a seeded demo run with no credentials and no network, and it
+     * is honest on the page — the fetch fails fast with a named reason (envTokenProvider throws
+     * before any request is built) while the persisted figures still render.
+     *
+     * The pairing below is the one combination that must stay impossible. A disposable database is
+     * one that `npm run test:db` truncates and `npm run seed` fills with invented pull requests;
+     * pointing a *fetching* process at one means real history is either destroyed on the next test
+     * run or interleaved with synthetic rows that no later query can tell apart.
+     */
+    const name = databaseName(databaseUrl) ?? '';
+    if (env.GITHUB_TOKEN && DISPOSABLE_DATABASE.test(name)) {
+        throw new Error(
+            `DATABASE_URL points at "${name}", which is disposable: the db suite truncates it and \`npm run seed\` writes synthetic pull requests into it. Refusing to persist real fetched history there. Use a database without a _test/_seed/_synthetic/_demo/_e2e suffix, or unset GITHUB_TOKEN to read what is already stored.`,
         );
     }
 
@@ -224,12 +234,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         repos: Object.freeze(repos.map((repo) => Object.freeze(repo))),
         baseBranch: env.BASE_BRANCH ?? 'dev',
         bots: Object.freeze(bots),
-        cacheTtlMs: ttlSeconds * 1000,
         syncTtlMs: syncTtlSeconds * 1000,
-        persistence,
         port: int(env.PORT, 8080, 'PORT'),
         host: env.HOST ?? '127.0.0.1',
-        dataSource,
         webRoot: env.WEB_ROOT ?? null,
         telemetrySource,
         databaseUrl,

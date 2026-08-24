@@ -7,7 +7,8 @@ services:
         ports:
             - '127.0.0.1:8080:8080'
         environment:
-            DATA_SOURCE: ${DATA_SOURCE:-fixture}
+            # Optional. Without it the dashboard never fetches and simply serves whatever is
+            # already in the database — which is a supported way to run, not a broken one.
             GITHUB_TOKEN: ${GITHUB_TOKEN:-}
             GITHUB_OWNER: ${GITHUB_OWNER:-Leeloo-AI-RGA-OS}
             # Empty-defaulted, unlike most of this block, so a mounted factory.toml's
@@ -21,17 +22,13 @@ services:
             # is now fatal rather than ignored.
             ORG_REPOS: ${ORG_REPOS:-}
             BASE_BRANCH: ${BASE_BRANCH:-dev}
-            CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-900}
+            # The only cache floor. CACHE_TTL_SECONDS is gone and is now fatal if set.
             SYNC_TTL_SECONDS: ${SYNC_TTL_SECONDS:-60}
-            # postgres, not fixture: this file provisions the database AND the collector, so
-            # fixture mode would 404 the ingest route and leave the collector retrying forever.
-            # The code default stays `fixture` for `npm run dev` and the test suite, which have
-            # no database.
             TELEMETRY_SOURCE: ${TELEMETRY_SOURCE:-postgres}
             TELEMETRY_TTL_SECONDS: ${TELEMETRY_TTL_SECONDS:-30}
-            # Set unconditionally, which is why PR persistence keys off DATA_SOURCE as well: with
-            # the fixture default above, persisting would write 203 synthetic PRs into
-            # factory_dev. The boot log says which of the two happened.
+            # Required, and pointed at the service this file provisions. Not overridable from the
+            # host: a factory_dev on the host is a different database from this one, and pointing
+            # the container at it would silently split history across two.
             DATABASE_URL: postgres://factory:factory@timescale:5432/factory_dev
             FACTORY_CONFIG: ${FACTORY_CONFIG:-}
         # A factory.toml has to be mounted in, since it is gitignored and dockerignored and so

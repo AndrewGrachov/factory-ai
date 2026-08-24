@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install
 
+# All of these need a database; there is no in-memory mode. `docker compose up -d timescale` first.
 npm run dev            # builds core, then API on 127.0.0.1:8080 + Vite on 5173 (/api proxied)
 npm run dev:server     # tsx watch, server only
 npm run dev:web        # vite only (needs the API running for /api)
@@ -17,16 +18,23 @@ npm start              # node server/dist/index.js (requires build)
 npm test               # vitest run — offline, no token, no quota, no database
 npm run typecheck      # tsc -b across all three project references
 
-# Real browser (chromium, headless). Builds, serves the SPA from the API on 8123 with fixture
-# data on both pipelines, walks every date range. Screenshots to artifacts/ui/ — read them; a
+# Real browser (chromium, headless). Builds, SEEDS factory_e2e, serves the SPA from the API on
+# 8123 and walks every date range. Still offline — no token, no quota, no network — but by way of
+# a seeded database rather than a replayed payload. Screenshots to artifacts/ui/ — read them; a
 # passing assertion says the DOM was right, only the image says the layout was.
-npm run verify:ui      # needs: npx playwright install chromium (once)
+npm run verify:ui      # needs: a running timescale, and `npx playwright install chromium` once
+
+# Fill a disposable database with synthetic PRs, base-branch history and agent sessions. Refuses
+# any database whose name does not mark it disposable: synthetic rows are indistinguishable from
+# real ones once written, and there is no way to separate them afterwards.
+DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run seed
 
 docker compose up --build   # SPA + API on 127.0.0.1:8080, TimescaleDB, OTEL collector
 
-# Two databases: factory_dev holds real data, factory_test is disposable. The db suite
-# TRUNCATES its tables, so it refuses any database not named *_test — pointing it at
-# factory_dev would silently destroy backfilled history, and the tests would still pass.
+# factory_dev holds real data; *_test, *_seed, *_synthetic, *_demo and *_e2e are disposable. The db
+# suite TRUNCATES its tables, so it refuses any database not named *_test — pointing it at
+# factory_dev would silently destroy backfilled history, and the tests would still pass. loadConfig
+# mirrors that: a process WITH a token refuses to run against any disposable name at all.
 docker compose up -d timescale
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_test npm run test:db
 
@@ -68,8 +76,9 @@ A new file in `core/src` must be re-exported from `core/src/index.ts` or the ser
 just as much like a source bug.
 
 **`server/migrations/*.sql` are not compiled by `tsc`**, so `docker/Dockerfile` copies them
-explicitly. The same is true of `server/src/github/fixtures/sample-payload.json`, which the
-fixture client reads at runtime. Forgetting either fails only in the container, never in dev.
+explicitly — by directory, so a new migration needs no Dockerfile edit. Forgetting that fails only
+in the container, never in dev. The GitHub capture no longer needs copying: nothing reads it at
+runtime any more.
 
 ## Architecture
 
@@ -83,8 +92,8 @@ fixture client reads at runtime. Forgetting either fails only in the container, 
 Data flow: `client.fetchPullRequests()` → `CanonicalPr[]` → `savePullRequests()` →
 `loadPullRequests()` → `deriveAll()` → `DerivedPr[]` → `compute()` → `Stats` → JSON → panels.
 `core/src/canonical.ts` and `core/src/types.ts` are the contract shared by all three packages; the
-SPA imports `Stats` from core rather than redeclaring it. The two store steps are skipped entirely
-when persistence is off, and the array then reaches `deriveAll()` in the order the fetch produced.
+SPA imports `Stats` from core rather than redeclaring it. Both store steps always run: the database
+is the only source, so `loadPullRequests()` — not the fetch — is what defines the set and its order.
 
 **`CanonicalPr` is provider-neutral, and that is load-bearing.** It used to be
 `RawPullRequest` — literally GitHub's GraphQL response, nested connections and all — which meant
@@ -98,28 +107,32 @@ Claude Code → OTEL collector → `POST /api/otlp/v1/metrics` → `flattenMetri
 `createPostgresTelemetryClient()` → `TelemetryInput` → `attribute()` → `TelemetryStats`, a
 sibling of `Stats` in the payload rather than a field inside it.
 
-Server wiring (`server/src/index.ts`): `loadConfig()` → forge client (`fixture` or `github`) →
-telemetry client (`fixture`, `postgres` or `off`) → PR store (`postgres` or absent) →
+Server wiring (`server/src/index.ts`): `loadConfig()` → GitHub client → pool + `migrate()`
+(un-awaited) → telemetry client (`postgres`, `fixture` or `off`) → PR store →
 `createStatsService()` → `buildApp()` → `prime()` (un-awaited) → `listen()`. `buildApp`
 deliberately does not `listen`, which is what lets `server/test/` drive the whole app in-process
 via `app.inject()` with stubbed clients and an in-memory store.
 
-`ForgeClient` (`server/src/forge.ts`) has two implementations — the live GraphQL client and
-`createFixtureClient()`, which replays `server/src/github/fixtures/sample-payload.json` (203 real
-PRs, captured 2026-08-21, already post-backfill) **through `toCanonical()`**, so the fixture path
-exercises the adapter rather than routing around it. `DATA_SOURCE=fixture` is the default, so the
-app and every test run with no token and no rate-limit cost.
+**There is one `ForgeClient` implementation, and a database is required.** `DATA_SOURCE=fixture`
+used to replay a captured payload so the app could run with no token and no database; both it and
+`createFixtureClient()` are gone, and the variable is now fatal rather than ignored. Data without a
+token comes from `npm run seed`, which writes synthetic rows into a *disposable* database through
+`createPrStore` — visible as rows somebody chose to write, rather than as a mode the process is
+quietly in. `server/src/github/fixture-payload.ts` and the 203-PR capture beside it survive as
+**test and tooling infrastructure only**: `server/test/helpers.ts`, `github.map.test.ts` and
+`capture-canonical.ts` read them, and nothing at runtime does.
 
 The raw capture sits beside the adapter because `core` cannot import from `server` and should not
 know GitHub's response shape. `core/test/fixtures/sample-canonical.json` is **derived** from it by
 `npm run fixture:canonical` and committed; regenerate it after any change to `toCanonical()`.
 
-`TelemetryClient` (`server/src/telemetry/client.ts`) mirrors that split exactly, and
-`TELEMETRY_SOURCE=fixture` is likewise the default — so `npm test` and a bare `npm run dev` need
-no database and no collector. The fixture replays `core/test/fixtures/telemetry-sessions.json`,
-which unlike the PR payload is **synthetic**: it is generated by `generate-telemetry.mjs` next to
-it, and the UI badges it loudly because invented token counts beside real PR numbers is exactly
-the problem the limitations panel exists to warn about.
+`TelemetryClient` (`server/src/telemetry/client.ts`) still has three sources, and `postgres` is now
+the default. `fixture` survives where the forge one did not because it feeds a *second, independent*
+pipeline whose absence degrades one set of panels rather than emptying the page; `off` is a product
+choice, not a way to avoid the database. The fixture replays
+`core/test/fixtures/telemetry-sessions.json`, which unlike the PR capture is **synthetic** —
+generated by `generate-telemetry.mjs` next to it — and the UI badges it loudly, because invented
+token counts beside real PR numbers is exactly what the limitations panel exists to warn about.
 
 The GitHub credential goes through the `TokenProvider` interface in `server/src/github/token.ts`
 so a GitHub App installation token can replace the PAT without touching call sites.
@@ -174,21 +187,21 @@ them. Do not "simplify" them.
 - **`stats.meta.window` is derived from array position, not min/max.** It used to rely on the
   query's `CREATED_AT DESC` ordering; with a store in play, `loadPullRequests()`'s
   `order by created_at desc, repo asc, number desc` is the single authority that keeps it true.
-  Do not sort in `stats-service.ts` (that puts the invariant in two places) and do not sort in
-  `deriveAll()` (that changes the no-database path too). Guarded by
+  Do not sort in `stats-service.ts` — that puts the invariant in two places. Guarded by
   `server/test/stats.persistence.test.ts` → "reports the window off creation order".
 - **`compute()` and `createStatsService()` take an injectable `now`.** The `partial` week flag
   and `generatedAt` depend on the current date; tests pin `FIXTURE_NOW` /
   `2026-08-21T12:00:00.000Z`. Keep using the injection point.
 - **`weeklySeries()` seeds every week in the window, including empty ones.** A median over only
   the weeks that had a merge overstates throughput.
-- **`CACHE_TTL_SECONDS` is rejected below 300 per configured repo**
-  (`MIN_TTL_SECONDS_PER_REPO`). A full fetch is ~243 rate-limit points and ~45s per repo against a
-  5000/hour budget. **`SYNC_TTL_SECONDS` (floor 60 per repo) is a second, lower floor used only
-  when a store is present** — an incremental sync is a few pages. It does not weaken the guard,
-  because the full walk is not gated by a TTL at all: it runs on `FULL_RESYNC_INTERVAL_MS` (24h)
-  and refuses to start unless `last_rate_limit.remaining` actually covers `243 × repos × 1.5`.
-  Reading the remaining budget is strictly stronger than inferring it from a clock.
+- **`SYNC_TTL_SECONDS` (floor 60 per repo) is the only cache floor, and `CACHE_TTL_SECONDS` is
+  gone.** The 300-per-repo floor protected a full walk's ~243 rate-limit points, which every
+  refresh used to be; history is always persisted now, so the ordinary refresh is an incremental
+  walk of a few pages. The full walk is not gated by a TTL at all — it runs on
+  `FULL_RESYNC_INTERVAL_MS` (24h) and refuses to start unless `last_rate_limit.remaining` actually
+  covers `243 × repos × 1.5`, and reading the remaining budget is strictly stronger than inferring
+  it from a clock. Setting `CACHE_TTL_SECONDS` is **fatal, not ignored**: a deployment that had
+  raised it to protect its quota would otherwise silently drop to the 60s floor.
 - **A stale snapshot is served with 200.** A rate limit must keep the last good render on screen
   and explain itself, not blank the dashboard. `useStats` likewise never clears `data` on error.
 - **`ERROR_COOLDOWN_MS` (30s) after a failed fetch.** Without it every request restarts the
@@ -326,17 +339,28 @@ record, so env wins by merge order.
   regression test.
 - **The file is stringified to env shape rather than parsed into `Partial<AppConfig>`.** Round-
   tripping `900` through `String()` so `int()` can re-parse it is circuitous, but the cross-source
-  rules (`DATA_SOURCE=github` requires `GITHUB_TOKEN`, the 300s floor) must hold over the *merged*
-  result, and a second validator would drift from the first.
+  rules (the disposable-database refusal, the sync floor) must hold over the *merged* result, and a
+  second validator would drift from the first.
 - **An empty environment variable is not an override.** `docker-compose.yml` passes
   `GITHUB_TOKEN: ${GITHUB_TOKEN:-}`, i.e. a literal `''` whenever the host has no token, which
   would clobber a mounted file on every start. Consequence: a file value is unset by deleting the
   line, not by `HOST=` in `.env`.
 - **An unknown key in the file is fatal; an unknown environment variable is ignored.** Same
   asymmetry as the attribute allowlist vs the metric denylist, for the same kind of reason: a file
-  has a closed key set, so `tokenn` is a typo — and a tolerated one boots the dashboard on
-  fixture data, indistinguishable from having no token. `GITHUB_REPOS` is the single exception on
-  the environment side; see the Organizations section for why.
+  has a closed key set, so `tokenn` is a typo — and a tolerated one boots a dashboard whose
+  operator believes it is authenticated. `GITHUB_REPOS`, `DATA_SOURCE` and `CACHE_TTL_SECONDS` are
+  the exceptions on the environment side: all three *were* meaningful, so ignoring one now would
+  change behaviour silently.
+- **`DATABASE_URL` is required, and `GITHUB_TOKEN` is not.** The database is the only source the
+  dashboard reads, so there is no configuration without one. A missing token is a supported state
+  rather than an error: the process does not fetch, `envTokenProvider` throws before a request is
+  ever built, and the persisted figures still render with the failure named in `meta`. That is what
+  lets `verify:ui` and a seeded demo run with no credentials and no network.
+- **A process WITH a token refuses a disposable database** (`_test`, `_seed`, `_synthetic`,
+  `_demo`, `_e2e`). `npm run test:db` truncates one and `npm run seed` fills one with invented pull
+  requests, so real fetched history put there is destroyed or made indistinguishable from
+  synthetic. Without a token the same pairing is *allowed*, because nothing is fetched to lose —
+  which is exactly how the seeding CLI and the browser check run.
 - **`ORG_ID`, `ORG_NAME` and `ORG_REPOS` are empty-defaulted in `docker-compose.yml`**, unlike most
   of that block. Every other variable there is a real value that beats a mounted file by design,
   but the org id leads every stored primary key — a literal default would clobber the file's
@@ -375,7 +399,9 @@ record, so env wins by merge order.
   opposite: there is no quota to protect, only a hot loop to prevent.
 - **Migrations are not awaited before `app.listen()`.** They retry with backoff for the better
   part of a minute while the container starts, and blocking would hold the PR metrics — which
-  need no database at all — hostage. The client gates its own queries on `ready`.
+  need no database at all — hostage. That reasoning survives the database becoming mandatory: a
+  *required* database is still a slow-starting one, and `prime()` plus every store call gates
+  itself on `ready`.
 - **Telemetry degrades alone, in four distinct states.** `disabled` renders no panels at all;
   `unreachable` renders frames with a reason and no numbers; `stale` serves the last good
   snapshot with 200; `empty` returns a *real* `TelemetryStats` with `sessions: 0` and null
@@ -431,10 +457,10 @@ record, so env wins by merge order.
   does not decompress, and the result is a flat `400` on every export with "Exporting failed.
   Dropping data" in the collector log and an `empty` dashboard. Symptoms point at the server; the
   cause is one line of collector YAML.
-- **`docker-compose.yml` defaults `TELEMETRY_SOURCE` to `postgres`, while the code defaults to
-  `fixture`.** They differ on purpose: compose provisions the database *and* the collector, so
-  fixture mode there would 404 the ingest route and leave the collector retrying forever. The code
-  default serves `npm run dev` and the test suite, which have neither.
+- **`TELEMETRY_SOURCE` defaults to `postgres` everywhere now.** It used to default to `fixture` in
+  code and `postgres` in compose, because `npm run dev` and the test suite had no database. Both
+  have one by construction now, and a fixture default would 404 the ingest route while a collector
+  is already exporting into it.
 - **`core/test/telemetry.independent.test.ts` shares no code with `core/src/telemetry.ts`**, for
   the same reason as its metrics counterpart.
 
@@ -476,18 +502,24 @@ record, so env wins by merge order.
 
 ### Persistence and incremental sync
 
-PR data is persisted whenever `DATABASE_URL` is set **and** `DATA_SOURCE` is not `fixture`. On
-boot `prime()` seeds the cache slot from the store, so a restart with a warm database serves real
-data on the first request rather than a 202.
+PR data is **always** persisted; there is no other place for it to live. On boot `prime()` seeds
+the cache slot from the store, so a restart with a warm database serves real data on the first
+request rather than a 202.
 
-- **Fixture data is never persisted, and there is no flag that says otherwise.** `DATA_SOURCE`
-  defaults to `fixture` and `docker-compose.yml` sets `DATABASE_URL` unconditionally, so the
-  default path is exactly the one that would write 203 synthetic PRs into `factory_dev`.
-  `config.persistence` is *derived* rather than configurable for that reason — the dangerous
-  combination has to be inexpressible, not merely distinguishable, the same lesson as the `*_test`
-  guard. And `loadConfig` **throws** on `DATA_SOURCE=github` with a `*_test` database, the mirror
-  of it: the db suite truncates that database, so real fetched history put there is lost on the
-  next `npm run test:db`.
+- **`store` is not optional, and there is no `if (!store)` branch anywhere.** The service used to
+  have a second, silent behaviour — an in-process cache that lost everything on restart — reachable
+  by forgetting `DATABASE_URL`. `StatsServiceDeps.store` is now required, `persistence.status` has
+  no `'off'`, and a process without a database refuses to boot instead of quietly forgetting.
+- **`memoryPrStore()` in `server/test/helpers.ts` is what keeps `npm test` offline.** Requiring a
+  store is a statement about *persistence being the only source*, not about PostgreSQL: it
+  implements `PrStore` in full and `harness()` defaults to it, so the offline suite needs no
+  container. Do not read the requirement as "tests need a database".
+- **Synthetic data reaches a database only through `npm run seed`, into a disposable one.** The
+  dangerous combination is still inexpressible, just relocated: it used to be prevented by deriving
+  `persistence` from `DATA_SOURCE`, and is now prevented by the seeding CLI's name allowlist plus
+  `loadConfig` refusing a disposable database whenever a token is set. Both halves matter — one
+  stops synthetic rows landing in `factory_dev`, the other stops real history landing somewhere
+  `npm run test:db` will truncate.
 - **`prime()` seeds with `last_sync_at`, never `now()`.** Seeding with `now()` reports
   `ageSeconds: 0, stale: false` off a three-day-old database, `ensureFresh()` then declines to
   sync, and the result is a permanently frozen dashboard that looks fresh.
@@ -552,8 +584,8 @@ logic through `memoryPrStore()` in `server/test/helpers.ts`.
 
 | Route | Behaviour |
 | --- | --- |
-| `GET /api/health` | Never calls GitHub or the database, so a token-less, DB-less container still reports healthy. |
-| `GET /api/stats` | `200` with `{ stats, telemetry, meta }`; `202` with progress while a cold fetch runs (SPA polls every 2s); `503` only if the first PR fetch failed **and** nothing is persisted. A cold boot with a warm database is a 200 because the seed landed — but both other codes stay reachable and deleting either is a regression. `telemetry` is `null` when unavailable, and `meta.persistence` degrades in four states (`ok` / `migrating` / `unavailable` / `off`); neither is ever a reason for a non-200. `?range=day\|week\|2w\|month\|all\|custom` (default `all`), plus `?from=&to=` for `custom`; `400 BAD_RANGE` on anything unparseable, never a silent fallback to all time. `?org=` is accepted and `400 UNKNOWN_ORG` on a mismatch — see below. |
+| `GET /api/health` | Never calls GitHub or the database. A container whose migrations are still retrying is up and answering, so probing either here would fail the compose healthcheck and restart the container that was about to succeed. |
+| `GET /api/stats` | `200` with `{ stats, telemetry, meta }`; `202` with progress while a cold fetch runs (SPA polls every 2s); `503` only if the first PR fetch failed **and** nothing is persisted. A cold boot with a warm database is a 200 because the seed landed — but both other codes stay reachable and deleting either is a regression. `telemetry` is `null` when unavailable, and `meta.persistence` degrades in three states (`ok` / `migrating` / `unavailable` — there is no `off`); neither is ever a reason for a non-200. `?range=day\|week\|2w\|month\|all\|custom` (default `all`), plus `?from=&to=` for `custom`; `400 BAD_RANGE` on anything unparseable, never a silent fallback to all time. `?org=` is accepted and `400 UNKNOWN_ORG` on a mismatch — see below. |
 | `POST /api/refresh` | `202`. Single-flight. Refreshes both caches. |
 | `POST /api/otlp/v1/metrics` | `200 {"partialSuccess":{}}`. 1 MB limit, JSON only. Registered only when a store exists. |
 | `POST /api/otlp/v1/logs` | `200`. Accepted and dropped — see M6 in the plan. |
@@ -598,11 +630,16 @@ database, and the attribute allowlist does not save you: that content arrives as
 ## Known limits
 
 - Charts are fixed-width; below ~700px the weekly axis labels become illegible.
-- The fixture is post-backfill, so the oversized-PR path (#149, 397 reviews) is not exercised by
-  it — `server/test-db/pr-store.test.ts` synthesises it instead.
-- The fixture capture predates `updatedAt`, commit `oid` and review-thread `id`, so
-  `fixturePayload()` fills them in. Safe only because fixture data is never persisted; nothing on
-  that path uses them.
+- The GitHub capture is post-backfill, so the oversized-PR path (#149, 397 reviews) is not
+  exercised by it — `server/test-db/pr-store.test.ts` synthesises it instead. `npm run seed` does
+  not produce one either: it never emits more children than it lists, so `truncated` is always
+  empty and the truncation write path is untested by a seeded database.
+- The capture predates `updatedAt`, commit `oid` and review-thread `id`, so `fixturePayload()`
+  fills them in. That is safe now only because nothing at runtime reads it — it is test and tooling
+  infrastructure, and the values never reach a database.
+- **Seeded data is deterministic but not stable across changes to the generator.** The browser
+  check asserts structure, not figures, for that reason. A spec that pins a seeded number will
+  break on an unrelated change to `synthetic.ts` and look like a UI regression.
 - An incremental sync cannot see a PR **deleted** upstream. A daily reconciliation reports rows it
   did not see, but does not remove them: losing expensively fetched history because a token lost a
   scope is worse than a stale count.

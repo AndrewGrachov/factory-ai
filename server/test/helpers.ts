@@ -45,15 +45,14 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         repos: [{ owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' }],
         baseBranch: 'dev',
         bots: ['claude', 'claude[bot]', 'github-actions', 'github-actions[bot]', 'leeloo-frontend-fix-bot'],
-        cacheTtlMs: 900_000,
         syncTtlMs: 60_000,
-        persistence: 'off',
         port: 0,
         host: '127.0.0.1',
-        dataSource: 'github',
         webRoot: null,
         telemetrySource: 'fixture',
-        databaseUrl: null,
+        // Never connected to: the harness injects a store and a telemetry stub directly. It is a
+        // literal here because AppConfig requires one, not because anything opens it.
+        databaseUrl: 'postgres://factory:factory@127.0.0.1:5432/factory_test',
         telemetryTtlMs: 30_000,
         repoNames: [TEST_REPO],
         ...overrides,
@@ -279,7 +278,13 @@ export async function harness(options: {
     config?: Partial<AppConfig>;
     /** Defaults to the fixture stub, so tests written before telemetry existed still pass. */
     telemetry?: TelemetryStub;
-    /** Absent by default, so the offline suite stays a no-database suite. */
+    /**
+     * Defaults to an empty in-memory store.
+     *
+     * The service requires one now, but that requirement is about *persistence being the only
+     * source*, not about PostgreSQL: `memoryPrStore()` satisfies `PrStore` in full, so the offline
+     * suite stays offline. Tests that care about what is already stored pass a seeded one.
+     */
     store?: PrStore;
 }) {
     const config = testConfig(options.config);
@@ -289,7 +294,7 @@ export async function harness(options: {
         config,
         client: options.client,
         telemetry,
-        store: options.store,
+        store: options.store ?? memoryPrStore(),
         now: () => clock,
     });
     const app = await buildApp({ config, service, now: () => clock });

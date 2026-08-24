@@ -21,6 +21,7 @@
         "verify:ui": "playwright test",
         "typecheck": "tsc -b",
         "backfill": "npm run build -w core && npm run build -w server && node server/dist/backfill/cli.js",
+        "seed": "npm run build -w core && npm run build -w server && node server/dist/seed/cli.js",
         "fixture:canonical": "npm run build -w core && tsx server/scripts/capture-canonical.ts"
     },
     "devDependencies": {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { GitHubError } from '../src/github/errors.js';
-import { harness, samplePrs, stubClient } from './helpers.js';
+import { TEST_REPO, harness, samplePrs, stubClient } from './helpers.js';
 
 let app: FastifyInstance | null = null;
 afterEach(async () => {
@@ -94,7 +94,7 @@ describe('a rate limit keeps the last good render', () => {
         const client = stubClient({
             prs: async () => {
                 if (fail) throw new GitHubError('Rate limit exhausted.', 'RATE_LIMITED', 403);
-                return { prs: structuredClone(samplePrs()), truncated: [], rateLimit: null };
+                return { prs: structuredClone(samplePrs()), rateLimit: null, completed: { [TEST_REPO]: true } };
             },
         });
         const h = await harness({ client });

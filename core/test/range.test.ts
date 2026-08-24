@@ -13,7 +13,7 @@ function pr(over: Partial<DerivedPr>): DerivedPr {
         authorIsBot: false,
         baseRefName: 'dev',
         headRefName: 'feat',
-        state: 'MERGED',
+        state: 'merged',
         createdAt: '2026-08-01T00:00:00.000Z',
         mergedAt: '2026-08-02T00:00:00.000Z',
         labels: [],
@@ -98,14 +98,14 @@ describe('filterPrs', () => {
     });
 
     it('keeps an open PR that existed by the end of the range', () => {
-        const opened = pr({ number: 1, state: 'OPEN', mergedAt: null, createdAt: '2026-07-01T00:00:00.000Z' });
-        const later = pr({ number: 2, state: 'OPEN', mergedAt: null, createdAt: '2026-08-25T00:00:00.000Z' });
+        const opened = pr({ number: 1, state: 'open', mergedAt: null, createdAt: '2026-07-01T00:00:00.000Z' });
+        const later = pr({ number: 2, state: 'open', mergedAt: null, createdAt: '2026-08-25T00:00:00.000Z' });
         expect(filterPrs([opened, later], august).map((p) => p.number)).toEqual([1]);
     });
 
     it('places a closed unmerged PR by createdAt, having no landing date', () => {
-        const inside = pr({ number: 1, state: 'CLOSED', mergedAt: null, createdAt: '2026-08-12T00:00:00.000Z' });
-        const outside = pr({ number: 2, state: 'CLOSED', mergedAt: null, createdAt: '2026-07-12T00:00:00.000Z' });
+        const inside = pr({ number: 1, state: 'closed', mergedAt: null, createdAt: '2026-08-12T00:00:00.000Z' });
+        const outside = pr({ number: 2, state: 'closed', mergedAt: null, createdAt: '2026-07-12T00:00:00.000Z' });
         expect(filterPrs([inside, outside], august).map((p) => p.number)).toEqual([1]);
     });
 });

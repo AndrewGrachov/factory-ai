@@ -1,18 +1,24 @@
 import { readFileSync } from 'node:fs';
-import type { PrTelemetryKey, RawPullRequest, TelemetryInput } from '../../src/types.js';
+import type { CanonicalPr } from '../../src/canonical.js';
+import type { PrTelemetryKey, TelemetryInput } from '../../src/types.js';
 import { deriveAll } from '../../src/metrics.js';
 
-let cached: RawPullRequest[] | null = null;
+let cached: CanonicalPr[] | null = null;
 let cachedTelemetry: TelemetryInput | null = null;
 
-/** Real API response covering 203 PRs, captured 2026-08-21. Already post-backfill. */
-export function samplePayload(): RawPullRequest[] {
+/**
+ * 203 real PRs, captured 2026-08-21 and already post-backfill.
+ *
+ * DERIVED, not verbatim: the raw GitHub capture lives beside the adapter that describes it, at
+ * server/src/github/fixtures/sample-payload.json, and this file is generated from it by
+ * `npm run fixture:canonical`. `core` cannot import from `server`, and it should not know
+ * GitHub's response shape anyway. Regenerate after any change to `toCanonical()` — the seam
+ * between raw and canonical is guarded by server/test/github.map.test.ts.
+ */
+export function samplePayload(): CanonicalPr[] {
     if (!cached) {
-        const raw = readFileSync(new URL('./sample-payload.json', import.meta.url), 'utf8');
-        // The committed JSON carries no repo identity, because a GraphQL response does not: the
-        // repo is knowledge the caller has. Stamped here rather than written into 203 records so
-        // the payload stays a verbatim capture.
-        cached = (JSON.parse(raw) as RawPullRequest[]).map((pr) => ({ ...pr, repo: FIXTURE_REPO }));
+        const raw = readFileSync(new URL('./sample-canonical.json', import.meta.url), 'utf8');
+        cached = JSON.parse(raw) as CanonicalPr[];
     }
     return cached;
 }

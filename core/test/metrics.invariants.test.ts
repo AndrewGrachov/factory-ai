@@ -5,10 +5,10 @@ import { FIXTURE_NOW, samplePayload } from './fixtures/load.js';
 const raw = samplePayload();
 const stats = compute(deriveAll(raw), { baseBranch: 'dev', now: FIXTURE_NOW });
 
-const merged = raw.filter((pr) => pr.mergedAt && pr.baseRefName === 'dev').length;
+const merged = raw.filter((pr) => pr.mergedAt && pr.baseRef === 'dev').length;
 const threadNodes = raw
-    .filter((pr) => pr.mergedAt && pr.baseRefName === 'dev')
-    .flatMap((pr) => pr.reviewThreads.nodes).length;
+    .filter((pr) => pr.mergedAt && pr.baseRef === 'dev')
+    .flatMap((pr) => pr.threads).length;
 
 // Invariants a plausible-but-wrong aggregation would violate. SPEC.md §5.2.
 describe('aggregation invariants', () => {

@@ -8,10 +8,10 @@ export function ReworkPanel({ stats }: { stats: Stats }) {
     const rows: HBarRow[] = [
         { label: 'after any review', value: r.afterAnyReview },
         { label: 'after human review', value: r.afterHumanReview },
-        { label: 'force-pushes', value: r.forcePushes },
     ];
-    // Without a readable branch history there is no revert count, and a zero-length bar
-    // would read as "no reverts".
+    // Force pushes moved to the key-value list below rather than staying a bar: the count is
+    // null on a forge that has no such event, and a zero-length bar reads as "none happened".
+    // Same reason the revert row is conditional.
     if (stats.quality.history) {
         rows.push({
             label: `reverts on ${stats.quality.history.branch}`,
@@ -40,6 +40,7 @@ export function ReworkPanel({ stats }: { stats: Stats }) {
                         `${r.prsWithHumanReview} of ${stats.meta.counts.mergedToBase}`,
                     ],
                     ['median commits after human review', num(r.medianCommitsAfterHumanReview, 1)],
+                    ['force-pushes', num(r.forcePushes)],
                 ]}
             />
         </section>

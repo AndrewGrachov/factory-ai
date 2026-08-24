@@ -1,4 +1,23 @@
-export { AI_LABELS, DEFAULT_BOTS, HOUR, SIZE_BUCKETS } from './config.js';
+export type {
+    CanonicalActor,
+    CanonicalCommit,
+    CanonicalPr,
+    CanonicalPrState,
+    CanonicalReview,
+    CanonicalReviewState,
+    CanonicalReviewThread,
+    PrConnection,
+    ProviderCapabilities,
+    ProviderId,
+} from './canonical.js';
+export {
+    AI_LABELS,
+    ALL_CAPABILITIES,
+    DEFAULT_BOTS,
+    HOUR,
+    SIZE_BUCKETS,
+    isRevertHeadline,
+} from './config.js';
 export type { SizeBucket } from './config.js';
 export {
     compute,

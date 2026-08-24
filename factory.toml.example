@@ -38,8 +38,13 @@ port = 8080
 host = "127.0.0.1"
 
 [cache]
-# A full fetch costs ~243 rate-limit points and ~45s, so the floor is 300.
+# The floor for a full walk of every PR: ~243 rate-limit points and ~45s per repo, so 300.
 ttl_seconds = 900
+
+# The floor once PR data is persisted and syncs have gone incremental — a few pages rather than a
+# full walk, so 60 per repo. The expensive full reconciliation is not gated by this: it runs daily
+# and refuses to start unless the remaining rate-limit budget actually covers it.
+sync_ttl_seconds = 60
 
 [telemetry]
 # `postgres` reports real sessions; `fixture` serves synthetic numbers the UI badges as such;

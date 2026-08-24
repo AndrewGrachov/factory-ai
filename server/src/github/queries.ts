@@ -5,11 +5,20 @@
 export const PAGE_SIZE = 25;
 export const INNER_LIMIT = 100;
 
+/**
+ * Full walks order by CREATED_AT DESC — the ordering `stats.meta.window` was written against.
+ * Incremental walks order by UPDATED_AT DESC so they can stop as soon as a page falls entirely
+ * below the watermark; the store re-imposes creation order on load, so nothing downstream sees
+ * the difference.
+ */
+export const CREATED_DESC = { field: 'CREATED_AT', direction: 'DESC' } as const;
+export const UPDATED_DESC = { field: 'UPDATED_AT', direction: 'DESC' } as const;
+
 export const PR_QUERY = `
-query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
+query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String, $order: IssueOrder!) {
   repository(owner: $owner, name: $name) {
     pullRequests(states: [MERGED, OPEN, CLOSED], first: $pageSize, after: $cursor,
-                 orderBy: { field: CREATED_AT, direction: DESC }) {
+                 orderBy: $order) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number
@@ -19,6 +28,7 @@ query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
         baseRefName
         headRefName
         createdAt
+        updatedAt
         mergedAt
         closedAt
         additions
@@ -27,7 +37,7 @@ query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
         author { login }
         commits(first: ${INNER_LIMIT}) {
           totalCount
-          nodes { commit { committedDate } }
+          nodes { commit { oid committedDate } }
         }
         comments(first: 0) { totalCount }
         labels(first: 20) { nodes { name } }
@@ -38,6 +48,7 @@ query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
         reviewThreads(first: ${INNER_LIMIT}) {
           totalCount
           nodes {
+            id
             isResolved
             isOutdated
             comments(first: 1) {
@@ -71,7 +82,7 @@ query($owner: String!, $name: String!, $branch: String!, $since: GitTimestamp!, 
           history(first: 100, after: $cursor, since: $since) {
             totalCount
             pageInfo { hasNextPage endCursor }
-            nodes { messageHeadline committedDate }
+            nodes { oid messageHeadline committedDate }
           }
         }
       }
@@ -90,6 +101,7 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       reviewThreads(first: ${INNER_LIMIT}, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
+          id
           isResolved
           isOutdated
           comments(first: 1) {

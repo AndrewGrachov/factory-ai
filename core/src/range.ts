@@ -72,7 +72,7 @@ export function filterPrs(prs: DerivedPr[], range: DateRange): DerivedPr[] {
     if (isAllTime(range)) return prs;
     return prs.filter((pr) => {
         if (pr.mergedAt) return within(pr.mergedAt, range);
-        if (pr.state === 'OPEN') return range.to === null || pr.createdAt < range.to;
+        if (pr.state === 'open') return range.to === null || pr.createdAt < range.to;
         return within(pr.createdAt, range);
     });
 }

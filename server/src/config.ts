@@ -8,12 +8,27 @@ export interface Repo {
     readonly name: string;
 }
 
+/**
+ * Whether fetched PR data is persisted. Derived from `databaseUrl` and `dataSource`, never
+ * configured: a second switch is a second source of truth, and the one thing it could express
+ * that the derivation cannot is "persist the fixture", which must stay inexpressible.
+ */
+export type PersistenceMode = 'postgres' | 'off';
+
 export interface AppConfig {
     /** The landing page reports every one of these combined. Never empty. */
     readonly repos: readonly Repo[];
     readonly baseBranch: string;
     readonly bots: readonly string[];
     readonly cacheTtlMs: number;
+    /**
+     * The slot TTL used once data is persisted and syncs have gone incremental. An incremental
+     * sync is a few pages, not a full walk, so it does not need the 300s-per-repo floor below —
+     * and the full walk it might escalate to is gated on its own schedule and on the remaining
+     * budget, not on this.
+     */
+    readonly syncTtlMs: number;
+    readonly persistence: PersistenceMode;
     readonly port: number;
     readonly host: string;
     readonly dataSource: DataSource;
@@ -38,6 +53,22 @@ const MIN_TTL_SECONDS_PER_REPO = 300;
 // Not a typo next to the 300s above: the reasons are opposite. A telemetry read is a local
 // query with no quota to protect, so the floor exists only to stop a hot loop.
 const MIN_TELEMETRY_TTL_SECONDS = 5;
+
+// An incremental sync is ~2-5 pages, so ~5-10 points: 60s per repo costs ~600 points/hour/repo,
+// about 12% of the 5000 budget, for a dashboard that is never more than a minute stale. The
+// expensive full walk is not gated by this at all — see FULL_RESYNC_INTERVAL_MS.
+const MIN_SYNC_TTL_SECONDS_PER_REPO = 60;
+
+/** A database whose name ends here is disposable: the db test suite truncates it. */
+const TEST_DATABASE = /_test$/;
+
+function databaseName(url: string): string | null {
+    try {
+        return new URL(url).pathname.replace(/^\//, '') || null;
+    } catch {
+        return null;
+    }
+}
 
 function int(raw: string | undefined, fallback: number, label: string): number {
     if (raw === undefined || raw === '') return fallback;
@@ -99,6 +130,26 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         throw new Error(`TELEMETRY_TTL_SECONDS must be at least ${MIN_TELEMETRY_TTL_SECONDS}`);
     }
 
+    const minSyncTtl = MIN_SYNC_TTL_SECONDS_PER_REPO * repos.length;
+    const syncTtlSeconds = int(env.SYNC_TTL_SECONDS, Math.max(60, minSyncTtl), 'SYNC_TTL_SECONDS');
+    if (syncTtlSeconds < minSyncTtl) {
+        throw new Error(
+            `SYNC_TTL_SECONDS must be at least ${minSyncTtl} for ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}; an incremental sync still costs a few rate-limit points per repo`,
+        );
+    }
+
+    const databaseUrl = env.DATABASE_URL ?? null;
+    // Fixture data is never persisted, and there is no flag to make it so. DATA_SOURCE defaults
+    // to fixture and docker-compose sets DATABASE_URL unconditionally, so the default path is
+    // exactly the one that would write 203 synthetic PRs into real history. The *_test guard in
+    // the db suite exists because that class of mistake is silent; this is its mirror.
+    const persistence: PersistenceMode = databaseUrl && dataSource !== 'fixture' ? 'postgres' : 'off';
+    if (persistence === 'postgres' && TEST_DATABASE.test(databaseName(databaseUrl as string) ?? '')) {
+        throw new Error(
+            `DATABASE_URL points at "${databaseName(databaseUrl as string)}", which the db test suite truncates. Persisting real fetched history there loses it on the next test run.`,
+        );
+    }
+
     const bots = env.BOTS
         ? env.BOTS.split(',')
               .map((b) => b.trim())
@@ -110,12 +161,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         baseBranch: env.BASE_BRANCH ?? 'dev',
         bots: Object.freeze(bots),
         cacheTtlMs: ttlSeconds * 1000,
+        syncTtlMs: syncTtlSeconds * 1000,
+        persistence,
         port: int(env.PORT, 8080, 'PORT'),
         host: env.HOST ?? '127.0.0.1',
         dataSource,
         webRoot: env.WEB_ROOT ?? null,
         telemetrySource,
-        databaseUrl: env.DATABASE_URL ?? null,
+        databaseUrl,
         telemetryTtlMs: telemetryTtlSeconds * 1000,
         repoNames: Object.freeze(repos.map((repo) => `${repo.owner}/${repo.name}`)),
     });

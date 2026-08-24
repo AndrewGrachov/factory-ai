@@ -1,10 +1,9 @@
-import { AI_LABELS, DEFAULT_BOTS, HOUR, SIZE_BUCKETS } from './config.js';
+import type { CanonicalActor, CanonicalPr, ProviderCapabilities } from './canonical.js';
+import { AI_LABELS, ALL_CAPABILITIES, DEFAULT_BOTS, HOUR, SIZE_BUCKETS } from './config.js';
 import type {
-    Actor,
     AuthorRow,
     BranchHistory,
     DerivedPr,
-    RawPullRequest,
     ReviewerRow,
     Stats,
     ThreadStats,
@@ -12,7 +11,7 @@ import type {
     WeekPoint,
 } from './types.js';
 
-const login = (actor: Actor | null | undefined): string => actor?.login ?? 'ghost';
+const login = (actor: CanonicalActor | null | undefined): string => actor?.login ?? 'ghost';
 
 export const defaultBots = (): Set<string> => new Set(DEFAULT_BOTS);
 
@@ -48,35 +47,27 @@ export function weekStart(isoDate: string): Date {
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
 }
 
-function timeline(pr: RawPullRequest) {
-    const commits = pr.commits.nodes.map((node) => node.commit.committedDate).sort();
-    const reviews = pr.reviews.nodes
+function timeline(pr: CanonicalPr) {
+    const commits = pr.commits.map((commit) => commit.committedAt).sort();
+    const reviews = pr.reviews
         .filter((review) => review.submittedAt)
         .map((review) => ({ at: review.submittedAt as string, author: login(review.author) }))
         .sort((a, b) => a.at.localeCompare(b.at));
 
-    return {
-        commits,
-        reviews,
-        forcePushes: pr.forcePushes.nodes.length,
-        readyAt: pr.readyForReview.nodes[0]?.createdAt ?? null,
-    };
+    return { commits, reviews };
 }
 
-function threadStats(pr: RawPullRequest, isBot: (name: string) => boolean): ThreadStats {
-    const threads = pr.reviewThreads.nodes.map((thread) => {
-        const first = thread.comments.nodes[0];
-        return {
-            author: login(first?.author),
-            reviewId: first?.pullRequestReview?.id ?? null,
-            resolved: thread.isResolved,
-            outdated: thread.isOutdated,
-        };
-    });
+function threadStats(pr: CanonicalPr, isBot: (name: string) => boolean): ThreadStats {
+    const threads = pr.threads.map((thread) => ({
+        author: login(thread.firstCommentAuthor),
+        reviewId: thread.parentReviewKey,
+        resolved: thread.isResolved,
+        outdated: thread.isOutdated,
+    }));
 
     const byAuthorClass = (bot: boolean) => threads.filter((t) => isBot(t.author) === bot);
     return {
-        total: pr.reviewThreads.totalCount,
+        total: pr.threadCount,
         threads,
         bot: byAuthorClass(true).length,
         human: byAuthorClass(false).length,
@@ -86,10 +77,14 @@ function threadStats(pr: RawPullRequest, isBot: (name: string) => boolean): Thre
     };
 }
 
-/** One flat record per PR — everything downstream reads these, not the raw nodes. */
-export function derive(pr: RawPullRequest, bots: Set<string> = defaultBots()): DerivedPr {
+/** One flat record per PR — everything downstream reads these, not the provider's nodes. */
+export function derive(
+    pr: CanonicalPr,
+    bots: Set<string> = defaultBots(),
+    capabilities: ProviderCapabilities = ALL_CAPABILITIES,
+): DerivedPr {
     const isBot = (name: string) => bots.has(name);
-    const { commits, reviews, forcePushes, readyAt } = timeline(pr);
+    const { commits, reviews } = timeline(pr);
     const threads = threadStats(pr, isBot);
 
     const firstReview = reviews[0] ?? null;
@@ -97,9 +92,12 @@ export function derive(pr: RawPullRequest, bots: Set<string> = defaultBots()): D
     const commitsAfter = (mark: string | undefined) =>
         mark ? commits.filter((c) => c > mark).length : 0;
 
-    // A review that owns no thread left no line comment — it is a body-only review.
-    const threadReviewIds = new Set(threads.threads.map((t) => t.reviewId).filter(Boolean));
-    const bodyOnlyReviews = pr.reviews.nodes.filter((r) => !threadReviewIds.has(r.id));
+    // A review that owns no thread left no line comment — it is a body-only review. Without
+    // review linkage the question cannot be asked at all, so the answer is null rather than
+    // "every review was body-only", which is what an empty id set would produce.
+    const threadReviewKeys = new Set(threads.threads.map((t) => t.reviewId).filter(Boolean));
+    const bodyOnly = (key: string): boolean | null =>
+        capabilities.reviewLinkage ? !threadReviewKeys.has(key) : null;
 
     const mergedAt = pr.mergedAt;
     const lastCommit = commits.length ? (commits[commits.length - 1] as string) : null;
@@ -112,38 +110,46 @@ export function derive(pr: RawPullRequest, bots: Set<string> = defaultBots()): D
         title: pr.title,
         author: login(pr.author),
         authorIsBot: isBot(login(pr.author)),
-        baseRefName: pr.baseRefName,
-        headRefName: pr.headRefName,
+        baseRefName: pr.baseRef,
+        headRefName: pr.headRef,
         state: pr.state,
         createdAt: pr.createdAt,
         mergedAt,
-        labels: pr.labels.nodes.map((l) => l.name),
-        hasAiLabel: pr.labels.nodes.some((l) => AI_LABELS.has(l.name)),
+        labels: pr.labels,
+        hasAiLabel: pr.labels.some((label) => AI_LABELS.has(label)),
         additions: pr.additions,
         deletions: pr.deletions,
         size: pr.additions + pr.deletions,
         changedFiles: pr.changedFiles,
-        commitCount: pr.commits.totalCount,
-        issueComments: pr.comments.totalCount,
-        reviewCount: pr.reviews.totalCount,
-        reviews: pr.reviews.nodes.map((r) => ({
-            id: r.id,
+        commitCount: pr.commitCount,
+        issueComments: pr.issueCommentCount,
+        reviewCount: pr.reviewCount,
+        reviews: pr.reviews.map((r) => ({
+            id: r.reviewKey,
             author: login(r.author),
-            state: r.state,
+            state: r.providerState,
             submittedAt: r.submittedAt,
-            bodyOnly: !threadReviewIds.has(r.id),
+            bodyOnly: bodyOnly(r.reviewKey),
         })),
-        bodyOnlyReviewCount: bodyOnlyReviews.length,
+        bodyOnlyReviewCount: capabilities.reviewLinkage
+            ? pr.reviews.filter((r) => !threadReviewKeys.has(r.reviewKey)).length
+            : null,
         threads,
-        forcePushes,
-        readyAt,
+        // Both already carry their own unavailability: the adapter nulls forcePushCount when
+        // the provider has no such event, and readyAt is null on a PR that was never a draft.
+        // Only review linkage needs the capability flag, because "no thread named a review"
+        // and "threads cannot name reviews here" look identical in the data.
+        forcePushes: pr.forcePushCount,
+        readyAt: pr.readyAt,
         firstReviewAt: firstReview?.at ?? null,
         firstHumanReviewAt: firstHumanReview?.at ?? null,
         commitsAfterAnyReview: commitsAfter(firstReview?.at),
         commitsAfterHumanReview: commitsAfter(firstHumanReview?.at),
         cycleHours: mergedMs !== null ? (mergedMs - createdMs) / HOUR : null,
         cycleFromReadyHours:
-            mergedMs !== null && readyAt ? (mergedMs - new Date(readyAt).getTime()) / HOUR : null,
+            mergedMs !== null && pr.readyAt
+                ? (mergedMs - new Date(pr.readyAt).getTime()) / HOUR
+                : null,
         firstReviewWaitHours: firstReview
             ? (new Date(firstReview.at).getTime() - createdMs) / HOUR
             : null,
@@ -154,6 +160,7 @@ export function derive(pr: RawPullRequest, bots: Set<string> = defaultBots()): D
             mergedMs !== null && lastCommit
                 ? (mergedMs - new Date(lastCommit).getTime()) / HOUR
                 : null,
+        truncated: pr.truncated,
     };
 }
 
@@ -267,7 +274,11 @@ function reviewerTable(merged: DerivedPr[], isBot: (name: string) => boolean): R
         for (const review of pr.reviews) {
             const r = row(review.author);
             r.reviews += 1;
-            if (review.bodyOnly) r.bodyOnlyReviews += 1;
+            // One unclassifiable review nulls the whole column for this reviewer. Skipping the
+            // increment instead would leave a 0, which reads as "always left line comments" —
+            // a claim about their reviewing rather than about the data.
+            if (review.bodyOnly === null) r.bodyOnlyReviews = null;
+            else if (review.bodyOnly && r.bodyOnlyReviews !== null) r.bodyOnlyReviews += 1;
             seen.add(review.author);
         }
         for (const name of seen) row(name).prsTouched += 1;
@@ -307,33 +318,34 @@ function authorTable(merged: DerivedPr[], isBot: (name: string) => boolean): Aut
         .sort((a, b) => a.login.localeCompare(b.login));
 }
 
-export function deriveAll(rawPrs: RawPullRequest[], bots: Set<string> = defaultBots()): DerivedPr[] {
-    return rawPrs.map((pr) => derive(pr, bots));
+export function deriveAll(
+    prs: CanonicalPr[],
+    bots: Set<string> = defaultBots(),
+    capabilities: ProviderCapabilities = ALL_CAPABILITIES,
+): DerivedPr[] {
+    return prs.map((pr) => derive(pr, bots, capabilities));
 }
 
 export interface ComputeOptions {
     history?: BranchHistory | null;
     baseBranch?: string;
-    truncated?: TruncatedPr[];
     bots?: Set<string>;
     /** Injected so the `partial` week flag and `generatedAt` are testable against a frozen fixture. */
     now?: Date;
 }
 
-/** Takes derived records (see `derive`), not raw GraphQL nodes. */
+/** Takes derived records (see `derive`), not a provider's response nodes. */
 export function compute(all: DerivedPr[], options: ComputeOptions = {}): Stats {
-    const {
-        history = null,
-        baseBranch = 'dev',
-        truncated = [],
-        bots = defaultBots(),
-        now = new Date(),
-    } = options;
+    const { history = null, baseBranch = 'dev', bots = defaultBots(), now = new Date() } = options;
     const isBot = (name: string) => bots.has(name);
 
     const merged = all.filter((pr) => pr.mergedAt && pr.baseRefName === baseBranch);
-    const open = all.filter((pr) => pr.state === 'OPEN');
-    const closedUnmerged = all.filter((pr) => pr.state === 'CLOSED');
+    const open = all.filter((pr) => pr.state === 'open');
+    const closedUnmerged = all.filter((pr) => pr.state === 'closed');
+
+    const truncated: TruncatedPr[] = all
+        .filter((pr) => pr.truncated.length)
+        .map((pr) => ({ repo: pr.repo, number: pr.number, connections: [...pr.truncated] }));
 
     const threadTotals = merged.reduce(
         (acc, pr) => ({
@@ -433,7 +445,13 @@ export function compute(all: DerivedPr[], options: ComputeOptions = {}): Stats {
             medianCommitsAfterHumanReview: median(
                 withHumanReview.map((pr) => pr.commitsAfterHumanReview),
             ),
-            forcePushes: merged.reduce((sum, pr) => sum + pr.forcePushes, 0),
+            // All-or-nothing across the set, for the same reason the revert rate is: adding up
+            // only the PRs whose provider can see force pushes gives a plausible number
+            // measured over an unknown subset. A plain reduce over nulls also yields NaN,
+            // which renders as the literal string "NaN".
+            forcePushes: merged.some((pr) => pr.forcePushes === null)
+                ? null
+                : merged.reduce((sum, pr) => sum + (pr.forcePushes as number), 0),
         },
         size: {
             histogram: SIZE_BUCKETS.map((bucket) => ({

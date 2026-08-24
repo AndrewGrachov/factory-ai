@@ -32,6 +32,10 @@ DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_test npm run test
 
 # Import history from ~/.claude/projects/*/*.jsonl. Idempotent; safe to re-run.
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_dev npm run backfill
+
+# Regenerate core/test/fixtures/sample-canonical.json from the raw GitHub capture. Run after any
+# change to toCanonical(); the core suite measures its output.
+npm run fixture:canonical
 ```
 
 Single test file / single case:
@@ -64,35 +68,51 @@ A new file in `core/src` must be re-exported from `core/src/index.ts` or the ser
 just as much like a source bug.
 
 **`server/migrations/*.sql` are not compiled by `tsc`**, so `docker/Dockerfile` copies them
-explicitly. Forgetting that fails only in the container, never in dev.
+explicitly. The same is true of `server/src/github/fixtures/sample-payload.json`, which the
+fixture client reads at runtime. Forgetting either fails only in the container, never in dev.
 
 ## Architecture
 
 | Package | Role |
 | --- | --- |
 | `core/` | Pure aggregation + shared types. No I/O, no dependencies. |
-| `server/` | Fastify API: GitHub GraphQL client, telemetry store, two cache slots, static SPA hosting. |
+| `server/` | Fastify API: forge adapters, PR store, telemetry store, two cache slots, static SPA hosting. |
 | `web/` | Vite + React 19 SPA, polls `/api/stats`. |
 | `plugins/agent-telemetry/` | Installable Claude Code plugin. Reports `session -> (repo, branch)`. |
 
-Data flow: `client.fetchPullRequests()` → `RawPullRequest[]` → `deriveAll()` → `DerivedPr[]` →
-`compute()` → `Stats` → JSON → panels. `core/src/types.ts` is the contract shared by all three
-packages; the SPA imports `Stats` from core rather than redeclaring it.
+Data flow: `client.fetchPullRequests()` → `CanonicalPr[]` → `savePullRequests()` →
+`loadPullRequests()` → `deriveAll()` → `DerivedPr[]` → `compute()` → `Stats` → JSON → panels.
+`core/src/canonical.ts` and `core/src/types.ts` are the contract shared by all three packages; the
+SPA imports `Stats` from core rather than redeclaring it. The two store steps are skipped entirely
+when persistence is off, and the array then reaches `deriveAll()` in the order the fetch produced.
+
+**`CanonicalPr` is provider-neutral, and that is load-bearing.** It used to be
+`RawPullRequest` — literally GitHub's GraphQL response, nested connections and all — which meant
+a second forge could only be added by faking GitHub's shape. `server/src/github/schema.ts` now
+holds that response type, `server/src/github/map.ts` maps it, and `server/src/forge.ts` holds the
+`ForgeClient` interface a `server/src/gitlab/` sibling would implement. `core` no longer knows
+GitHub exists.
 
 Telemetry is a **second, independent pipeline** that meets the first only at response assembly:
 Claude Code → OTEL collector → `POST /api/otlp/v1/metrics` → `flattenMetrics()` → TimescaleDB →
 `createPostgresTelemetryClient()` → `TelemetryInput` → `attribute()` → `TelemetryStats`, a
 sibling of `Stats` in the payload rather than a field inside it.
 
-Server wiring (`server/src/index.ts`): `loadConfig()` → GitHub client (`fixture` or `github`) →
-telemetry client (`fixture`, `postgres` or `off`) → `createStatsService()` → `buildApp()`.
-`buildApp` deliberately does not `listen`, which is what lets `server/test/` drive the whole app
-in-process via `app.inject()` with stubbed clients.
+Server wiring (`server/src/index.ts`): `loadConfig()` → forge client (`fixture` or `github`) →
+telemetry client (`fixture`, `postgres` or `off`) → PR store (`postgres` or absent) →
+`createStatsService()` → `buildApp()` → `prime()` (un-awaited) → `listen()`. `buildApp`
+deliberately does not `listen`, which is what lets `server/test/` drive the whole app in-process
+via `app.inject()` with stubbed clients and an in-memory store.
 
-`GitHubClient` (`server/src/github/client.ts`) is an interface with two implementations — the
-live GraphQL client and `createFixtureClient()`, which replays `core/test/fixtures/sample-payload.json`
-(203 real PRs, captured 2026-08-21, already post-backfill). `DATA_SOURCE=fixture` is the default,
-so the app and every test run with no token and no rate-limit cost.
+`ForgeClient` (`server/src/forge.ts`) has two implementations — the live GraphQL client and
+`createFixtureClient()`, which replays `server/src/github/fixtures/sample-payload.json` (203 real
+PRs, captured 2026-08-21, already post-backfill) **through `toCanonical()`**, so the fixture path
+exercises the adapter rather than routing around it. `DATA_SOURCE=fixture` is the default, so the
+app and every test run with no token and no rate-limit cost.
+
+The raw capture sits beside the adapter because `core` cannot import from `server` and should not
+know GitHub's response shape. `core/test/fixtures/sample-canonical.json` is **derived** from it by
+`npm run fixture:canonical` and committed; regenerate it after any change to `toCanonical()`.
 
 `TelemetryClient` (`server/src/telemetry/client.ts`) mirrors that split exactly, and
 `TELEMETRY_SOURCE=fixture` is likewise the default — so `npm test` and a bare `npm run dev` need
@@ -138,14 +158,25 @@ them. Do not "simplify" them.
 - **`ratio()` returns `null`, never `0`, on a zero denominator.** The entire
   unavailable-vs-zero contract on the page rests on this. "0 reverts in 0 commits" reads as a
   real answer.
-- **Totals come from `totalCount`; distributions come from node lists.** GraphQL caps nested
-  connections at 100 nodes (`INNER_LIMIT`). PRs over that get a second pass in
-  `backfill()`; anything still cut is reported in `stats.meta.truncated` rather than silently
-  undercounted.
+- **Totals come from the count fields; distributions come from the arrays beside them.** GraphQL
+  caps nested connections at 100 nodes (`INNER_LIMIT`). PRs over that get a second pass in
+  `backfill()`; anything still cut lands in `CanonicalPr.truncated` and surfaces as
+  `stats.meta.truncated` rather than being silently undercounted. `CanonicalPr` names the two
+  separately (`reviewCount` vs `reviews`) precisely so no call site can confuse them — a
+  `{ totalCount, nodes }` wrapper reads as if they agree, and for #149 they differ by 297.
 - **Force pushes are counted from the filtered node list.** `timelineItems.totalCount` ignores
   `itemTypes` and reports the whole timeline — it once claimed 404 force pushes across 14 PRs.
-- **`stats.meta.window` relies on the query's `CREATED_AT DESC` ordering.** Do not "fix" it to
-  min/max.
+- **`forcePushCount` is `number | null` and `bodyOnlyReviews` degrades to null.** Null means the
+  provider cannot observe the thing; 0 means it can and none happened. `Stats.rework.forcePushes`
+  is all-or-nothing across the set for the same reason the revert rate is, and a plain reduce over
+  nulls would render the literal string "NaN". Guarded by the NaN walker in
+  `metrics.invariants.test.ts` and by `core/test/canonical.derive.test.ts`.
+- **`stats.meta.window` is derived from array position, not min/max.** It used to rely on the
+  query's `CREATED_AT DESC` ordering; with a store in play, `loadPullRequests()`'s
+  `order by created_at desc, repo asc, number desc` is the single authority that keeps it true.
+  Do not sort in `stats-service.ts` (that puts the invariant in two places) and do not sort in
+  `deriveAll()` (that changes the no-database path too). Guarded by
+  `server/test/stats.persistence.test.ts` → "reports the window off creation order".
 - **`compute()` and `createStatsService()` take an injectable `now`.** The `partial` week flag
   and `generatedAt` depend on the current date; tests pin `FIXTURE_NOW` /
   `2026-08-21T12:00:00.000Z`. Keep using the injection point.
@@ -153,7 +184,11 @@ them. Do not "simplify" them.
   the weeks that had a merge overstates throughput.
 - **`CACHE_TTL_SECONDS` is rejected below 300 per configured repo**
   (`MIN_TTL_SECONDS_PER_REPO`). A full fetch is ~243 rate-limit points and ~45s per repo against a
-  5000/hour budget.
+  5000/hour budget. **`SYNC_TTL_SECONDS` (floor 60 per repo) is a second, lower floor used only
+  when a store is present** — an incremental sync is a few pages. It does not weaken the guard,
+  because the full walk is not gated by a TTL at all: it runs on `FULL_RESYNC_INTERVAL_MS` (24h)
+  and refuses to start unless `last_rate_limit.remaining` actually covers `243 × repos × 1.5`.
+  Reading the remaining budget is strictly stronger than inferring it from a clock.
 - **A stale snapshot is served with 200.** A rate limit must keep the last good render on screen
   and explain itself, not blank the dashboard. `useStats` likewise never clears `data` on error.
 - **`ERROR_COOLDOWN_MS` (30s) after a failed fetch.** Without it every request restarts the
@@ -161,8 +196,12 @@ them. Do not "simplify" them.
 - **The revert rate degrades alone.** It is the only metric needing `Contents: read`; a missing
   ref returns `null` history and `revert.status = 'unavailable'`, never `{commits: 0, reverts: 0}`.
 - **`core/test/metrics.independent.test.ts` shares no code with `core/src/metrics.ts` on
-  purpose.** It recomputes headline numbers off the raw payload and pins SPEC §1 landmarks.
-  Importing helpers into it would make a wrong number invisible.
+  purpose.** It recomputes headline numbers off the canonical payload and pins SPEC §1 landmarks.
+  Importing helpers into it would make a wrong number invisible. **`server/test/github.map.test.ts`
+  holds the other half of that chain**, recomputing the same landmarks off the *raw* GitHub
+  capture — the seam moved there when `core` stopped speaking GitHub. If any of 203 / 178 / 654 /
+  226 / 624 / 30 / 37 / 153.5 / 224 / 0.325 moves, the adapter is wrong; do not adjust the
+  expectation.
 - **Do not switch GraphQL pagination to `gh api graphql --paginate`.** It only advances the
   cursor if the variable is named `$endCursor`; anything else silently re-requests page 1 forever.
 - **When a PR page times out, shrink the nested selections, not `PAGE_SIZE` (25).** Per-page cost
@@ -174,17 +213,23 @@ The landing page reports **every repo in `config.repos` as one set of figures**.
 are not built yet; when they are, they filter `meta.repos` and the `repo` field on each row rather
 than refetching.
 
-- **`repo` ("owner/name") is stamped onto every `RawPullRequest` by the client, not read from the
+- **`repo` ("owner/name") is stamped onto every `CanonicalPr` by the adapter, not read from the
   payload.** A GraphQL response carries no repo identity — the query does. `sample-payload.json`
-  is a verbatim capture and stays that way; the fixture client and the test loaders stamp it the
-  same way the live client does.
+  is a verbatim capture and stays that way; `toCanonical(raw, repo)` takes the name as an
+  argument, which is how the fixture client and the capture script stamp it the same way the live
+  client does.
+- **Every primary key in `004_pull_requests.sql` carries both `provider` and `repo`.** A repo path
+  is not unique across forges (`group/proj` exists on gitlab.com and on a self-hosted instance),
+  and a PR number is unique only within a repo. Guarded by `pr-store.test.ts` →
+  "keeps the same number under two repos apart".
 - **Every map in `attribute()` is keyed by `repo#number` or `repo@branch`, never by `number` or
   `branch` alone.** Neither is unique across repos: two repos routinely both have a `#204` and a
   `main`. Keyed on either alone, a combined view reports one repo's tokens on the other repo's PR
   and labels it `exact`. Guarded by `core/test/telemetry.attribution.test.ts` →
   "a branch is not unique across repos", which fails loudly if the keys are ever simplified back.
-  The same applies to `unmatched.branches` (a `{repo, branch}` list, not a string list) and to the
-  `truncated` filter in `stats-service.current()`.
+  The same applies to `unmatched.branches` (a `{repo, branch}` list, not a string list). The old
+  `truncated` filter in `stats-service.current()` is gone: `truncated` now rides on the PR record
+  itself, so there is no side channel left to key wrongly.
 - **The revert rate is all-or-nothing across repos.** `fetchBranchHistories()` returns one entry
   per repo, and if *any* repo's `dev` is unreadable the combined figure is reported `unavailable`
   naming that repo. Summing the repos that did resolve would produce a plausible number measured
@@ -332,9 +377,13 @@ record, so env wins by merge order.
   and `attribute()` at read time over `filterPrs()`, so every range is served from the one fetch
   the rate-limit budget paid for and no cache key mentions a range. Pre-aggregating again would
   either bucket the cache per range or force the selector to be cosmetic.
-- **A narrowed range reports the revert rate as `unavailable`, not as a number.** The commit
-  history was fetched with `since` = earliest merge of the *whole* window and cannot be re-sliced
-  without another GitHub call; left in place it would read as the revert rate for the range.
+- **A narrowed range reports the revert rate from persisted commit rows, and `unavailable` when
+  it cannot.** `revertForRange()` slices `StatsSnapshot.commits`. It refuses in three cases, each
+  of which would otherwise be a ratio over an unknown subset: nothing persisted (the pre-store
+  behaviour), `commits.length !== history.commits` (a partial scan, so the row count is not a
+  valid denominator), and any repo whose `branch_history.covered_from` is later than `range.from`
+  — that last one names the repo, because a combined figure over a subset is worse than none.
+  All-time still uses the provider's reported total, never a row count.
 - **Presets are a rolling lookback, not a calendar period.** "This week" on a Tuesday would
   otherwise cover two days and look like a throughput collapse.
 - **Range membership follows the timestamp each metric is already bucketed by**: merged PRs by
@@ -350,16 +399,86 @@ record, so env wins by merge order.
   straddling the boundary did real work inside the range; and coverage is what distinguishes "no
   AI usage in this range" from "telemetry does not reach back this far".
 
+### Persistence and incremental sync
+
+PR data is persisted whenever `DATABASE_URL` is set **and** `DATA_SOURCE` is not `fixture`. On
+boot `prime()` seeds the cache slot from the store, so a restart with a warm database serves real
+data on the first request rather than a 202.
+
+- **Fixture data is never persisted, and there is no flag that says otherwise.** `DATA_SOURCE`
+  defaults to `fixture` and `docker-compose.yml` sets `DATABASE_URL` unconditionally, so the
+  default path is exactly the one that would write 203 synthetic PRs into `factory_dev`.
+  `config.persistence` is *derived* rather than configurable for that reason — the dangerous
+  combination has to be inexpressible, not merely distinguishable, the same lesson as the `*_test`
+  guard. And `loadConfig` **throws** on `DATA_SOURCE=github` with a `*_test` database, the mirror
+  of it: the db suite truncates that database, so real fetched history put there is lost on the
+  next `npm run test:db`.
+- **`prime()` seeds with `last_sync_at`, never `now()`.** Seeding with `now()` reports
+  `ageSeconds: 0, stale: false` off a three-day-old database, `ensureFresh()` then declines to
+  sync, and the result is a permanently frozen dashboard that looks fresh.
+- **`cache.seed()` only fills an empty slot.** A seed arriving after a live fetch landed is older
+  by definition. And `ensureFresh()` returns early while `prime()` is in flight — otherwise the
+  first sync races the seed, wins, and burns a full walk for nothing.
+- **A persistence failure never propagates out of `produce()`.** It would set `lastFailureAt` and
+  freeze the whole PR pipeline for 30s over a database fault. Every store call goes through
+  `tryStore()`, which records `persistence.status = 'unavailable'` and returns null. Guarded by
+  `server/test/stats.persistence.test.ts` → "does not set the fetch cooldown".
+- **The watermark is a `sync_state` column, not `max(provider_updated_at)` over `pull_request`.**
+  That maximum advances on every successful upsert, *including part-way through a walk that then
+  died* — the next run would resume from the newest row it happened to write and skip everything
+  in between, silently and permanently. It advances only for a repo whose `completed[repo]` is
+  true.
+- **The incremental cutoff is `min(watermark − 5min, now − 14d, oldest open PR's updatedAt)`.**
+  Each term earns its place. The overlap covers GraphQL replica lag, without which an update is
+  missed forever and invisibly. The other two exist because `updatedAt` does **not** reliably bump
+  on a *child* change — a thread resolved, a label removed, a force push — and those feed
+  `headline.unresolvedThreadRatio`, the most prominent number on the page. Do not replace them
+  with a second query path.
+- **An incremental walk orders `UPDATED_AT DESC` and stops only after a whole page falls below the
+  cutoff.** `orderBy` is not a strict total order across equal timestamps, so a mid-page stop can
+  drop a sibling of the node that triggered it. **Do not** instead keep `CREATED_AT DESC` and stop
+  on `createdAt`: that never re-reads an old PR, so a thread resolved on a three-month-old one
+  never lands and the unresolved ratio freezes.
+- **A full reconciliation runs every 24h, or when `synced_epoch < SCHEMA_EPOCH`.** The epoch bump
+  is the important half: it is the only repair for a newly selected field leaving old rows null,
+  which is silently wrong for old PRs only. Bump `SCHEMA_EPOCH` when you add one.
+- **A truncated child list is upserted, never delete-and-replaced.** This is the single most
+  dangerous line in the write path. A degraded refetch of #149 returns 100 reviews with the total
+  still reading 397; replacing 397 rows with 100 corrupts the resolution ratio with no error
+  anywhere. The decision is **per connection**, because one PR can arrive with a complete commit
+  list and a truncated review list in the same fetch. A *complete* list is delete-and-replaced,
+  which is the only thing that ever makes a review deleted upstream stop being counted.
+  `pr-store.truncation.test.ts` also asserts `count(*) from pr_review !== review_count` for #149
+  on purpose, so nobody "fixes" the discrepancy by making the total a `count(*)` — that would
+  undercount by 297.
+- **`truncated` is recomputed on every write, never unioned.** A union leaves a stale caveat on the
+  page after a successful backfill has already filled the list in.
+- **`branch_commit` stores `message_headline`, not a precomputed `is_revert`.** Same reason
+  `metric_point` stores datapoints and not rollups: the classifier (`isRevertHeadline` in
+  `core/src/config.ts`) will change, and a verdict cannot be re-derived. It also lives in `core`
+  so the server and any slicing path share one definition.
+- **A base-branch rescan resumes an hour behind the newest stored commit.** `since` is inclusive
+  upstream, so the tip repeats and the primary key makes that a no-op. The overlap is not
+  paranoia: a commit date is not monotonic with history order, so a rebase can place a commit
+  behind its own parent and a zero-overlap resume genuinely skips it.
+- **`branch_history.covered_from` only ever moves backwards.** A later scan starting from a newer
+  bound has not lost the older commits, and moving it forward would make a range that *is* covered
+  report as unavailable.
+- **`ttlMs` is `syncTtlMs` when a store is present and `cacheTtlMs` otherwise**, and the history
+  loop now has a `MAX_HISTORY_PAGES` cap it was missing — a first scan of a busy monorepo could
+  page until the quota ran out.
+
 **Tradeoff worth knowing:** the SQL, the views and the migration runner have **no coverage in
 `npm test`**. That is the price of keeping the default suite offline and database-free; they are
-covered by `npm run test:db`, which needs a running container.
+covered by `npm run test:db`, which needs a running container. The offline suite covers the same
+logic through `memoryPrStore()` in `server/test/helpers.ts`.
 
 ## API
 
 | Route | Behaviour |
 | --- | --- |
 | `GET /api/health` | Never calls GitHub or the database, so a token-less, DB-less container still reports healthy. |
-| `GET /api/stats` | `200` with `{ stats, telemetry, meta }`; `202` with progress while a cold fetch runs (SPA polls every 2s); `503` if the first PR fetch failed. `telemetry` is `null` when unavailable — never a reason for a non-200. `?range=day\|week\|2w\|month\|all\|custom` (default `all`), plus `?from=&to=` for `custom`; `400 BAD_RANGE` on anything unparseable, never a silent fallback to all time. |
+| `GET /api/stats` | `200` with `{ stats, telemetry, meta }`; `202` with progress while a cold fetch runs (SPA polls every 2s); `503` only if the first PR fetch failed **and** nothing is persisted. A cold boot with a warm database is a 200 because the seed landed — but both other codes stay reachable and deleting either is a regression. `telemetry` is `null` when unavailable, and `meta.persistence` degrades in four states (`ok` / `migrating` / `unavailable` / `off`); neither is ever a reason for a non-200. `?range=day\|week\|2w\|month\|all\|custom` (default `all`), plus `?from=&to=` for `custom`; `400 BAD_RANGE` on anything unparseable, never a silent fallback to all time. |
 | `POST /api/refresh` | `202`. Single-flight. Refreshes both caches. |
 | `POST /api/otlp/v1/metrics` | `200 {"partialSuccess":{}}`. 1 MB limit, JSON only. Registered only when a store exists. |
 | `POST /api/otlp/v1/logs` | `200`. Accepted and dropped — see M6 in the plan. |
@@ -390,7 +509,15 @@ database, and the attribute allowlist does not save you: that content arrives as
 
 - Charts are fixed-width; below ~700px the weekly axis labels become illegible.
 - The fixture is post-backfill, so the oversized-PR path (#149, 397 reviews) is not exercised by
-  it.
+  it — `server/test-db/pr-store.test.ts` synthesises it instead.
+- The fixture capture predates `updatedAt`, commit `oid` and review-thread `id`, so
+  `fixturePayload()` fills them in. Safe only because fixture data is never persisted; nothing on
+  that path uses them.
+- An incremental sync cannot see a PR **deleted** upstream. A daily reconciliation reports rows it
+  did not see, but does not remove them: losing expensively fetched history because a token lost a
+  scope is worse than a stale count.
+- The persisted PR store is single-writer. Two dashboards sharing one database would both sync and
+  both advance the same watermark; nothing detects it.
 - Token and line counts are what the agent wrote, not what survived to merge. There is no SHA in
   the telemetry, so no "AI share of this diff" number is possible.
 - Attribution starts when the plugin is installed. A PR merged before that shows no usage, which

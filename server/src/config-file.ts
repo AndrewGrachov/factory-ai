@@ -22,6 +22,7 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     'server.host': { env: 'HOST', kind: 'string' },
     'server.web_root': { env: 'WEB_ROOT', kind: 'string' },
     'cache.ttl_seconds': { env: 'CACHE_TTL_SECONDS', kind: 'int' },
+    'cache.sync_ttl_seconds': { env: 'SYNC_TTL_SECONDS', kind: 'int' },
     'telemetry.source': { env: 'TELEMETRY_SOURCE', kind: 'string' },
     'telemetry.database_url': { env: 'DATABASE_URL', kind: 'string' },
     'telemetry.ttl_seconds': { env: 'TELEMETRY_TTL_SECONDS', kind: 'int' },

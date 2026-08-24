@@ -3,8 +3,11 @@ import { compute, deriveAll } from '../src/metrics.js';
 import { FIXTURE_NOW, samplePayload } from './fixtures/load.js';
 
 // Deliberately duplicated rather than imported: this file recomputes every number
-// straight off the raw payload so that a bug on either side shows up as a mismatch.
+// straight off the canonical payload so that a bug on either side shows up as a mismatch.
 // Sharing helpers with metrics.ts would make a wrong number invisible.
+//
+// The raw-to-canonical half of the chain is covered independently by
+// server/test/github.map.test.ts, which recomputes the same landmarks off the GitHub capture.
 const BOTS = new Set([
     'claude',
     'claude[bot]',
@@ -16,29 +19,27 @@ const BOTS = new Set([
 const raw = samplePayload();
 const stats = compute(deriveAll(raw), { baseBranch: 'dev', now: FIXTURE_NOW });
 
-const mergedRaw = raw.filter((pr) => pr.mergedAt && pr.baseRefName === 'dev');
-const threadsRaw = mergedRaw.flatMap((pr) => pr.reviewThreads.nodes);
+const mergedRaw = raw.filter((pr) => pr.mergedAt && pr.baseRef === 'dev');
+const threadsRaw = mergedRaw.flatMap((pr) => pr.threads);
 
-describe('independent recomputation off the raw payload', () => {
+describe('independent recomputation off the canonical payload', () => {
     it('counts PRs the same way', () => {
         expect(stats.meta.counts.all).toBe(raw.length);
         expect(stats.meta.counts.mergedToBase).toBe(mergedRaw.length);
-        expect(stats.meta.counts.open).toBe(raw.filter((pr) => pr.state === 'OPEN').length);
+        expect(stats.meta.counts.open).toBe(raw.filter((pr) => pr.state === 'open').length);
         expect(stats.meta.counts.closedUnmerged).toBe(
-            raw.filter((pr) => pr.state === 'CLOSED').length,
+            raw.filter((pr) => pr.state === 'closed').length,
         );
     });
 
-    it('totals threads from totalCount, not the truncatable node list', () => {
-        expect(stats.threads.total).toBe(
-            mergedRaw.reduce((s, pr) => s + pr.reviewThreads.totalCount, 0),
-        );
+    it('totals threads from the authoritative count, not the truncatable node list', () => {
+        expect(stats.threads.total).toBe(mergedRaw.reduce((s, pr) => s + pr.threadCount, 0));
         expect(stats.threads.resolved).toBe(threadsRaw.filter((t) => t.isResolved).length);
     });
 
     it('splits threads by the first comment author', () => {
         const botAuthored = threadsRaw.filter((t) =>
-            BOTS.has(t.comments.nodes[0]?.author?.login ?? 'ghost'),
+            BOTS.has(t.firstCommentAuthor?.login ?? 'ghost'),
         ).length;
         expect(stats.threads.bot).toBe(botAuthored);
         expect(stats.threads.human).toBe(threadsRaw.length - botAuthored);
@@ -46,7 +47,7 @@ describe('independent recomputation off the raw payload', () => {
 
     it('totals reviews the same way', () => {
         expect(stats.reviewers.reduce((s, r) => s + r.reviews, 0)).toBe(
-            mergedRaw.reduce((s, pr) => s + pr.reviews.totalCount, 0),
+            mergedRaw.reduce((s, pr) => s + pr.reviewCount, 0),
         );
     });
 

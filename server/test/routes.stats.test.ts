@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { harness, stubClient } from './helpers.js';
+import { TEST_REPO, harness, stubClient } from './helpers.js';
 
 let app: FastifyInstance | null = null;
 afterEach(async () => {
@@ -17,7 +17,7 @@ describe('GET /api/stats', () => {
         const client = stubClient({
             prs: async () => {
                 await gate;
-                return { prs: [], truncated: [], rateLimit: null };
+                return { prs: [], rateLimit: null, completed: { [TEST_REPO]: true } };
             },
         });
         const h = await harness({ client });

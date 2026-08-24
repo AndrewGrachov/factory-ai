@@ -21,7 +21,7 @@ const mine = telemetry.sessions.filter((s) => s.repo === FIXTURE_REPO);
 /** Every merged-or-open PR, restated from the payload rather than from deriveAll(). */
 const payloadPrs = samplePayload().map((pr) => ({
     number: pr.number,
-    branch: pr.headRefName,
+    branch: pr.headRef,
     closesAt: pr.mergedAt ?? '9999',
 }));
 
@@ -149,9 +149,9 @@ describe('landmarks pinned against the payload', () => {
     it('confirms the reused-branch hazard this join exists to handle', () => {
         // If this ever becomes 0, the time-containment matching is no longer load-bearing and
         // the simpler branch-only join would be correct. Until then it is not.
-        const merged = samplePayload().filter((pr) => pr.mergedAt && pr.baseRefName === 'dev');
+        const merged = samplePayload().filter((pr) => pr.mergedAt && pr.baseRef === 'dev');
         const counts = new Map<string, number>();
-        for (const pr of merged) counts.set(pr.headRefName, (counts.get(pr.headRefName) ?? 0) + 1);
+        for (const pr of merged) counts.set(pr.headRef, (counts.get(pr.headRef) ?? 0) + 1);
         const reused = [...counts.values()].filter((n) => n > 1).length;
         expect(reused).toBe(9);
     });

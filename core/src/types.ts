@@ -1,52 +1,4 @@
-export interface Actor {
-    login: string;
-}
-
-export interface RawPullRequest {
-    /**
-     * "owner/name". Stamped by the client as it maps each repo's response, because the GraphQL
-     * query is per-repo and the payload itself carries no repo identity. A PR number is only
-     * unique within a repo, so the combined view needs this to say which #204 it means.
-     */
-    repo: string;
-    number: number;
-    title: string;
-    state: 'OPEN' | 'CLOSED' | 'MERGED';
-    isDraft: boolean;
-    baseRefName: string;
-    headRefName: string;
-    createdAt: string;
-    mergedAt: string | null;
-    closedAt: string | null;
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    author: Actor | null;
-    commits: { totalCount: number; nodes: { commit: { committedDate: string } }[] };
-    comments: { totalCount: number };
-    labels: { nodes: { name: string }[] };
-    reviews: {
-        totalCount: number;
-        nodes: { id: string; author: Actor | null; state: string; submittedAt: string | null }[];
-    };
-    reviewThreads: {
-        totalCount: number;
-        nodes: {
-            isResolved: boolean;
-            isOutdated: boolean;
-            comments: {
-                nodes: {
-                    author: Actor | null;
-                    createdAt: string;
-                    pullRequestReview: { id: string } | null;
-                }[];
-            };
-        }[];
-    };
-    // Counted from the filtered node list, never totalCount — see queries.ts.
-    forcePushes: { nodes: { __typename: string }[] };
-    readyForReview: { nodes: { createdAt: string }[] };
-}
+import type { CanonicalPrState, PrConnection } from './canonical.js';
 
 export interface ThreadRecord {
     author: string;
@@ -70,11 +22,12 @@ export interface DerivedReview {
     author: string;
     state: string;
     submittedAt: string | null;
-    bodyOnly: boolean;
+    /** null when the provider cannot link a thread to the review it was opened under. */
+    bodyOnly: boolean | null;
 }
 
 export interface DerivedPr {
-    /** "owner/name", carried through from RawPullRequest. */
+    /** "owner/name", carried through from CanonicalPr. */
     repo: string;
     number: number;
     title: string;
@@ -82,7 +35,7 @@ export interface DerivedPr {
     authorIsBot: boolean;
     baseRefName: string;
     headRefName: string;
-    state: 'OPEN' | 'CLOSED' | 'MERGED';
+    state: CanonicalPrState;
     createdAt: string;
     mergedAt: string | null;
     labels: string[];
@@ -95,9 +48,11 @@ export interface DerivedPr {
     issueComments: number;
     reviewCount: number;
     reviews: DerivedReview[];
-    bodyOnlyReviewCount: number;
+    /** null when the provider cannot link threads to reviews — see DerivedReview.bodyOnly. */
+    bodyOnlyReviewCount: number | null;
     threads: ThreadStats;
-    forcePushes: number;
+    /** null when the provider cannot observe force pushes; 0 when it can and none happened. */
+    forcePushes: number | null;
     readyAt: string | null;
     firstReviewAt: string | null;
     firstHumanReviewAt: string | null;
@@ -108,6 +63,13 @@ export interface DerivedPr {
     firstReviewWaitHours: number | null;
     firstHumanReviewWaitHours: number | null;
     lastCommitToMergeHours: number | null;
+    /**
+     * Carried through from CanonicalPr so `Stats.meta.truncated` can be derived from the PRs
+     * in scope. Kept on the record rather than passed alongside it: as a side channel it had
+     * to be re-filtered by `repo#number` at every call site, and one call site forgetting
+     * would report another repo's caveat.
+     */
+    truncated: PrConnection[];
 }
 
 export interface BranchHistory {
@@ -140,7 +102,11 @@ export interface ReviewerRow {
     isBot: boolean;
     threads: number;
     resolved: number;
-    bodyOnlyReviews: number;
+    /**
+     * null when any of this reviewer's reviews could not be classified. Zero would read as
+     * "always left line comments", which is a claim about their reviewing, not about the data.
+     */
+    bodyOnlyReviews: number | null;
     reviews: number;
     prsTouched: number;
     resolvedRatio: number | null;
@@ -388,7 +354,12 @@ export interface Stats {
         afterHumanReview: number;
         medianCommitsAfterAnyReview: number | null;
         medianCommitsAfterHumanReview: number | null;
-        forcePushes: number;
+        /**
+         * null when any PR in scope came from a provider that cannot observe force pushes.
+         * All-or-nothing for the same reason the revert rate is: summing only the PRs that
+         * could be measured gives a plausible number over an unknown subset.
+         */
+        forcePushes: number | null;
     };
     size: {
         histogram: { label: string; count: number }[];

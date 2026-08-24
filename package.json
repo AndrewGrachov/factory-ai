@@ -20,7 +20,8 @@
         "test:db": "vitest run --config vitest.db.config.ts",
         "verify:ui": "playwright test",
         "typecheck": "tsc -b",
-        "backfill": "npm run build -w core && npm run build -w server && node server/dist/backfill/cli.js"
+        "backfill": "npm run build -w core && npm run build -w server && node server/dist/backfill/cli.js",
+        "fixture:canonical": "npm run build -w core && tsx server/scripts/capture-canonical.ts"
     },
     "devDependencies": {
         "@playwright/test": "1.62.1",

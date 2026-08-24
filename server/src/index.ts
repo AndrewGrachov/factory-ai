@@ -1,6 +1,6 @@
 import postgres from 'postgres';
 import { buildApp } from './app.js';
-import { loadConfig } from './config.js';
+import { resolveConfig } from './config-file.js';
 import { migrate } from './db/migrate.js';
 import { createPostgresTelemetryClient } from './telemetry/postgres-client.js';
 import { createPostgresStore } from './telemetry/store.js';
@@ -10,11 +10,18 @@ import { envTokenProvider } from './github/token.js';
 import { createStatsService } from './stats-service.js';
 import { createFixtureTelemetryClient, createNullTelemetryClient } from './telemetry/fixture-client.js';
 
-const config = loadConfig();
+// `env` is the file merged under process.env. It has to reach envTokenProvider, which is the one
+// place outside config.ts that reads the PAT and would otherwise ignore the file's copy of it.
+const { config, env, source } = resolveConfig();
+console.log(`[config] ${source ?? 'no config file; environment only'}`);
+
 const client =
     config.dataSource === 'fixture'
-        ? createFixtureClient()
-        : createGitHubClient({ config, tokens: envTokenProvider() });
+        ? // Stamped with the first configured repo so the fixture agrees with the config it is
+          // standing in for. The payload itself came from one capture, so one name is honest.
+          // loadConfig rejects an empty repo list, so index 0 always exists.
+          createFixtureClient({ repo: config.repoNames[0] as string })
+        : createGitHubClient({ config, tokens: envTokenProvider(env) });
 
 function buildTelemetry() {
     if (config.telemetrySource === 'off') {

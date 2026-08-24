@@ -41,43 +41,54 @@ export function DataTable<T extends object>({ columns, rows, sortable = false }:
         );
 
     return (
-        <table className="data">
-            <thead>
-                <tr>
-                    {columns.map((column) => {
-                        const active = sort?.key === column.key;
-                        const direction = active ? (sort.descending ? 'desc' : 'asc') : '';
-                        return (
-                            <th
-                                key={column.key}
-                                className={sortable ? `sortable ${direction}`.trim() : undefined}
-                                aria-sort={
-                                    active ? (sort.descending ? 'descending' : 'ascending') : 'none'
-                                }
-                                onClick={sortable ? () => toggle(column.key) : undefined}
-                            >
-                                {column.label}
-                            </th>
-                        );
-                    })}
-                </tr>
-            </thead>
-            <tbody>
-                {sorted.map((row, i) => (
-                    <tr key={i}>
+        // Scroll rather than spill: cells are nowrap, so the table is as wide as its content
+        // needs. Repo-qualified PR labels widened it past the panel, and the columns at the far
+        // right — attribution among them — were silently clipped.
+        <div className="table-wrap">
+            <table className="data">
+                <thead>
+                    <tr>
                         {columns.map((column) => {
-                            const value = column.format
-                                ? column.format(row)
-                                : (row[column.key] as unknown);
+                            const active = sort?.key === column.key;
+                            const direction = active ? (sort.descending ? 'desc' : 'asc') : '';
                             return (
-                                <td key={column.key}>
-                                    {value === null || value === undefined ? '—' : String(value)}
-                                </td>
+                                <th
+                                    key={column.key}
+                                    className={sortable ? `sortable ${direction}`.trim() : undefined}
+                                    aria-sort={
+                                        active
+                                            ? sort.descending
+                                                ? 'descending'
+                                                : 'ascending'
+                                            : 'none'
+                                    }
+                                    onClick={sortable ? () => toggle(column.key) : undefined}
+                                >
+                                    {column.label}
+                                </th>
                             );
                         })}
                     </tr>
-                ))}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    {sorted.map((row, i) => (
+                        <tr key={i}>
+                            {columns.map((column) => {
+                                const value = column.format
+                                    ? column.format(row)
+                                    : (row[column.key] as unknown);
+                                return (
+                                    <td key={column.key}>
+                                        {value === null || value === undefined
+                                            ? '—'
+                                            : String(value)}
+                                    </td>
+                                );
+                            })}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
     );
 }

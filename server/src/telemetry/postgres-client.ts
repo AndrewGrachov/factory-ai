@@ -158,6 +158,7 @@ export function createPostgresTelemetryClient({
                     if (indivisible) {
                         return {
                             sessionId: slice.session_id,
+                            repo: slice.repo,
                             branch: slice.branch,
                             from: slice.first_seen.toISOString(),
                             to: slice.last_seen.toISOString(),
@@ -179,6 +180,7 @@ export function createPostgresTelemetryClient({
                         );
                         return {
                             sessionId: slice.session_id,
+                            repo: slice.repo,
                             branch: slice.branch,
                             from: slice.first_seen.toISOString(),
                             to: slice.last_seen.toISOString(),
@@ -192,6 +194,7 @@ export function createPostgresTelemetryClient({
                             ?.value ?? 0;
                     return {
                         sessionId: slice.session_id,
+                        repo: slice.repo,
                         branch: slice.branch,
                         from: slice.first_seen.toISOString(),
                         to: slice.last_seen.toISOString(),

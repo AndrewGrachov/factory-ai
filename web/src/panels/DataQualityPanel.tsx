@@ -1,10 +1,11 @@
 import type { Stats } from '@factory-ai/core';
 import type { StatsPayload } from '../api/useStats.js';
-import { pct } from '../format.js';
+import { pct, prLabel } from '../format.js';
 
 export function DataQualityPanel({ stats, meta }: { stats: Stats; meta: StatsPayload['meta'] }) {
     const q = stats.quality;
     const range = meta.range;
+    const repoCount = meta.repos.length;
     const items: string[] = [
         // The window bounds shown elsewhere are what the fetch returned, not what was asked
         // for; without this line a narrowed range looks like a shrinking repository.
@@ -35,7 +36,7 @@ export function DataQualityPanel({ stats, meta }: { stats: Stats; meta: StatsPay
         }
         if (t.otherRepoSessions > 0) {
             items.push(
-                `${t.otherRepoSessions} agent session(s) happened in another repo and are excluded; this dashboard only counts ${t.repoFilter}.`,
+                `${t.otherRepoSessions} agent session(s) happened in another repo and are excluded; this dashboard only counts ${t.repoFilter.join(', ')}.`,
             );
         }
         if (t.source === 'fixture') {
@@ -49,7 +50,7 @@ export function DataQualityPanel({ stats, meta }: { stats: Stats; meta: StatsPay
     if (truncated.length) {
         items.push(
             `Distributions are incomplete for PRs ${truncated
-                .map((t) => `#${t.number}`)
+                .map((t) => prLabel(t.repo, t.number, repoCount))
                 .join(', ')} — more than 100 items in ${truncated[0]?.connections.join(', ')}. Totals are still exact.`,
         );
     }

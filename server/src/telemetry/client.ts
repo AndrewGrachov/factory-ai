@@ -16,7 +16,7 @@ export interface TelemetryHealth {
  * default so `npm test` and a bare `npm run dev` need no database and no collector.
  */
 export interface TelemetryClient {
-    fetchRollups(options?: { repo?: string; since?: string }): Promise<TelemetryInput>;
+    fetchRollups(options?: { repos?: readonly string[]; since?: string }): Promise<TelemetryInput>;
     /** Never throws — it is called on the degradation path. */
     health(): Promise<TelemetryHealth>;
 }

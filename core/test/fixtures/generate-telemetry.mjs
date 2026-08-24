@@ -48,7 +48,7 @@ function session(id, opts) {
         const share = part.share;
         const scale = (v) => (share === null || v === null ? null : Math.round(v * share));
         splits.push({
-            sessionId: id, branch: part.branch, from: part.from, to: part.to, share,
+            sessionId: id, repo, branch: part.branch, from: part.from, to: part.to, share,
             tokens: {
                 input: scale(tokens.input), output: scale(tokens.output),
                 cacheRead: scale(tokens.cacheRead), cacheCreation: scale(tokens.cacheCreation),

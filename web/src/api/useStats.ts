@@ -18,7 +18,7 @@ export interface TelemetryMeta {
     fetchedAt: string | null;
     ageSeconds: number | null;
     stale: boolean;
-    repoFilter: string;
+    repoFilter: string[];
     otherRepoSessions: number;
     sessionsWithoutHook: number;
 }
@@ -33,7 +33,8 @@ export interface StatsPayload {
         source: 'live' | 'fixture';
         rateLimit: RateLimit | null;
         revert: { status: 'ok' | 'unavailable'; reason: string | null };
-        repo: { owner: string; name: string };
+        /** Every repo the figures combine. Length 1 is the common case, not a special case. */
+        repos: { owner: string; name: string }[];
         baseBranch: string;
         /** The range the server actually aggregated over, presets already resolved. */
         range: DateRange;
@@ -44,6 +45,7 @@ export interface StatsPayload {
 export interface FetchState {
     state: 'idle' | 'loading' | 'error';
     phase: 'prs' | 'backfill' | 'history' | null;
+    repo: string | null;
     prsFetched: number | null;
     backfillingPr: number | null;
     historyScanned: number | null;

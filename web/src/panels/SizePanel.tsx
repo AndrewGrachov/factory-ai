@@ -1,12 +1,12 @@
 import type { Stats } from '@factory-ai/core';
 import { Histogram } from '../charts/BarChart.js';
 import { Scatter } from '../charts/Scatter.js';
-import { duration } from '../format.js';
+import { duration, prLabel } from '../format.js';
 
 const dotClass = (botThreads: number) =>
     botThreads > 10 ? 'dot dot-bad' : botThreads > 0 ? 'dot dot-warn' : 'dot';
 
-export function SizePanel({ stats }: { stats: Stats }) {
+export function SizePanel({ stats, repoCount }: { stats: Stats; repoCount: number }) {
     return (
         <section className="panel">
             <h2>PR size</h2>
@@ -27,7 +27,7 @@ export function SizePanel({ stats }: { stats: Stats }) {
                         x: p.size,
                         y: p.hours,
                         className: dotClass(p.botThreads),
-                        title: `#${p.number} — ${p.size} LOC, ${duration(p.hours)}, ${p.botThreads} bot threads`,
+                        title: `${prLabel(p.repo, p.number, repoCount)} — ${p.size} LOC, ${duration(p.hours)}, ${p.botThreads} bot threads`,
                     }))}
                     width={460}
                     xLabel="PR size, LOC (log)"

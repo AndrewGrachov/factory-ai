@@ -151,8 +151,9 @@ them. Do not "simplify" them.
   `2026-08-21T12:00:00.000Z`. Keep using the injection point.
 - **`weeklySeries()` seeds every week in the window, including empty ones.** A median over only
   the weeks that had a merge overstates throughput.
-- **`CACHE_TTL_SECONDS` is rejected below 300** (`MIN_TTL_SECONDS`). A full fetch is ~243
-  rate-limit points and ~45s against a 5000/hour budget.
+- **`CACHE_TTL_SECONDS` is rejected below 300 per configured repo**
+  (`MIN_TTL_SECONDS_PER_REPO`). A full fetch is ~243 rate-limit points and ~45s per repo against a
+  5000/hour budget.
 - **A stale snapshot is served with 200.** A rate limit must keep the last good render on screen
   and explain itself, not blank the dashboard. `useStats` likewise never clears `data` on error.
 - **`ERROR_COOLDOWN_MS` (30s) after a failed fetch.** Without it every request restarts the
@@ -166,6 +167,77 @@ them. Do not "simplify" them.
   cursor if the variable is named `$endCursor`; anything else silently re-requests page 1 forever.
 - **When a PR page times out, shrink the nested selections, not `PAGE_SIZE` (25).** Per-page cost
   is superlinear in the nested connections.
+
+### The combined repo view
+
+The landing page reports **every repo in `config.repos` as one set of figures**. Per-repo pages
+are not built yet; when they are, they filter `meta.repos` and the `repo` field on each row rather
+than refetching.
+
+- **`repo` ("owner/name") is stamped onto every `RawPullRequest` by the client, not read from the
+  payload.** A GraphQL response carries no repo identity — the query does. `sample-payload.json`
+  is a verbatim capture and stays that way; the fixture client and the test loaders stamp it the
+  same way the live client does.
+- **Every map in `attribute()` is keyed by `repo#number` or `repo@branch`, never by `number` or
+  `branch` alone.** Neither is unique across repos: two repos routinely both have a `#204` and a
+  `main`. Keyed on either alone, a combined view reports one repo's tokens on the other repo's PR
+  and labels it `exact`. Guarded by `core/test/telemetry.attribution.test.ts` →
+  "a branch is not unique across repos", which fails loudly if the keys are ever simplified back.
+  The same applies to `unmatched.branches` (a `{repo, branch}` list, not a string list) and to the
+  `truncated` filter in `stats-service.current()`.
+- **The revert rate is all-or-nothing across repos.** `fetchBranchHistories()` returns one entry
+  per repo, and if *any* repo's `dev` is unreadable the combined figure is reported `unavailable`
+  naming that repo. Summing the repos that did resolve would produce a plausible number measured
+  over an unknown subset — the exact failure the null-not-zero contract exists to prevent.
+- **Repos are fetched sequentially, and `MIN_TTL_SECONDS_PER_REPO` (300) is multiplied by the repo
+  count.** The ~243-point cost is paid once per repo, so a fixed floor weakens as repos are added
+  — which is when it matters most. Concurrent fetches would burn the budget in a burst the TTL
+  cannot smooth out.
+- **`config.repoNames` is derived from `config.repos`, and there is no separate telemetry repo
+  setting.** A second list is a second source of truth that silently drops sessions the moment it
+  drifts.
+- **The SPA qualifies a PR number only when more than one repo is in scope** (`prLabel()` in
+  `web/src/format.ts`). Prefixing every row on a single-repo dashboard trains the reader to skip
+  the prefix, which defeats it on the day a second repo appears.
+
+### Configuration
+
+Two sources: environment variables, and an optional `factory.toml` (see `factory.toml.example`).
+The file layer lives entirely in `server/src/config-file.ts` and hands `loadConfig` an env-shaped
+record, so env wins by merge order.
+
+- **`loadConfig` does no I/O, and `server/src/config.ts` is untouched by the file layer.**
+  `loadConfig({})` has to mean the same thing on every machine; if the validator read the disk,
+  the existing `describe('loadConfig')` cases would start reading whatever `factory.toml` the
+  developer happens to keep and fail on exactly one machine. That block's survival is the
+  regression test.
+- **The file is stringified to env shape rather than parsed into `Partial<AppConfig>`.** Round-
+  tripping `900` through `String()` so `int()` can re-parse it is circuitous, but the cross-source
+  rules (`DATA_SOURCE=github` requires `GITHUB_TOKEN`, the 300s floor) must hold over the *merged*
+  result, and a second validator would drift from the first.
+- **An empty environment variable is not an override.** `docker-compose.yml` passes
+  `GITHUB_TOKEN: ${GITHUB_TOKEN:-}`, i.e. a literal `''` whenever the host has no token, which
+  would clobber a mounted file on every start. Consequence: a file value is unset by deleting the
+  line, not by `HOST=` in `.env`.
+- **An unknown key in the file is fatal; an unknown environment variable is ignored.** Same
+  asymmetry as the attribute allowlist vs the metric denylist, for the same kind of reason: a file
+  has a closed key set, so `tokenn` is a typo — and a tolerated one boots the dashboard on
+  fixture data, indistinguishable from having no token.
+- **A missing `FACTORY_CONFIG` path is fatal; a missing default path is silent.** One is an
+  explicit request that could not be honoured, the other is the supported env-only mode that the
+  test suite and CI run in.
+- **Discovery walks upward and stops at `package-lock.json`.** `npm run dev -w server` runs with
+  cwd `server/`, so a repo-root file has to be reachable from a subdirectory — but an unbounded
+  walk would escape into `$HOME` and pick up an unrelated file. The marker sits at the repo root
+  and at `/app` in the container.
+- **`resolveConfig` returns the merged record, and `index.ts` passes it to `envTokenProvider`.**
+  That provider is the only PAT read outside `config.ts`; left on its `process.env` default it
+  would silently ignore the file's token while the config believed it had one.
+- **Integers must be unquoted and strings must be strings** (`ttl_seconds = "900"` is rejected),
+  so the file stays honestly typed instead of drifting into env-style stringly values. A `bots`
+  entry containing a comma is rejected because the env form is comma-separated.
+- **Never log the merged record.** It holds the PAT. Log key names, provenance and the resolved
+  path only.
 
 ### Telemetry
 
@@ -302,6 +374,10 @@ tag would not let dev allow the Vite HMR websocket).
 
 Required fine-grained PAT permissions: `Metadata: read`, `Pull requests: read`, and
 `Contents: read` (revert rate only).
+
+The PAT may now sit on disk in `factory.toml`, which is gitignored and dockerignored. `chmod 600`
+it — the boot warning about a group/world-readable mode is not decorative, because no
+application-level auth plus a readable token is worse than either alone.
 
 The telemetry ingest routes are unauthenticated, and the collector listens on 4317/4318. Both are
 bound to `127.0.0.1` for the same reason as the dashboard. **Keep

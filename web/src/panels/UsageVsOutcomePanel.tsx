@@ -1,15 +1,17 @@
 import type { TelemetryStats } from '@factory-ai/core';
 import type { TelemetryMeta } from '../api/useStats.js';
 import { Scatter } from '../charts/Scatter.js';
-import { duration, tokens } from '../format.js';
+import { duration, prLabel, tokens } from '../format.js';
 import { TelemetryFrame } from './TelemetryFrame.js';
 
 export function UsageVsOutcomePanel({
     telemetry,
     meta,
+    repoCount,
 }: {
     telemetry: TelemetryStats;
     meta: TelemetryMeta;
+    repoCount: number;
 }) {
     // 'linked' AND 'exact': both carry real numbers, and linked is the stronger tier — filtering
     // to 'exact' alone blanked this panel entirely on data where every PR came from a
@@ -47,7 +49,7 @@ export function UsageVsOutcomePanel({
                                 x: used,
                                 y: r.cycleHours as number,
                                 className: r.commitsAfterHumanReview > 0 ? 'dot dot-warn' : 'dot',
-                                title: `#${r.number} — ${tokens(used)} tokens, ${duration(r.cycleHours)}, ${r.sessions} session(s)`,
+                                title: `${prLabel(r.repo, r.number, repoCount)} — ${tokens(used)} tokens, ${duration(r.cycleHours)}, ${r.sessions} session(s)`,
                             };
                         })}
                         width={460}

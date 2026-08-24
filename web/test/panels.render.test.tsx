@@ -19,28 +19,30 @@ import { tokens } from '../src/format.js';
  * react-dom/server needs no DOM, so this stays in the default offline suite.
  */
 
+const REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
+
 const raw = JSON.parse(
     readFileSync(new URL('../../core/test/fixtures/sample-payload.json', import.meta.url), 'utf8'),
-) as RawPullRequest[];
+) as Omit<RawPullRequest, 'repo'>[];
 const input = JSON.parse(
     readFileSync(new URL('../../core/test/fixtures/telemetry-sessions.json', import.meta.url), 'utf8'),
 ) as TelemetryInput;
 
 const NOW = new Date('2026-08-21T12:00:00.000Z');
-const REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
-const derived = deriveAll(raw);
+// Stamped, as both real clients do: the captured payload has no repo identity of its own.
+const derived = deriveAll(raw.map((pr) => ({ ...pr, repo: REPO })));
 const stats = compute(derived, { baseBranch: 'dev', now: NOW });
 const keys: PrTelemetryKey[] = derived.map((pr) => ({
-    number: pr.number, author: pr.author, headRefName: pr.headRefName, createdAt: pr.createdAt,
+    repo: pr.repo, number: pr.number, author: pr.author, headRefName: pr.headRefName, createdAt: pr.createdAt,
     mergedAt: pr.mergedAt, size: pr.size, cycleHours: pr.cycleHours,
     commitsAfterHumanReview: pr.commitsAfterHumanReview,
 }));
-const telemetry = attribute(keys, input, { repo: REPO, now: NOW });
-const empty = attribute(keys, { sessions: [], spans: [], splits: [], links: [], coverage: { from: null, to: null } }, { repo: REPO, now: NOW });
+const telemetry = attribute(keys, input, { repos: [REPO], now: NOW });
+const empty = attribute(keys, { sessions: [], spans: [], splits: [], links: [], coverage: { from: null, to: null } }, { repos: [REPO], now: NOW });
 
 const meta = (over: Partial<TelemetryMeta> = {}): TelemetryMeta => ({
     status: 'ok', reason: null, source: 'fixture', fetchedAt: NOW.toISOString(),
-    ageSeconds: 0, stale: false, repoFilter: REPO, otherRepoSessions: 1, sessionsWithoutHook: 1,
+    ageSeconds: 0, stale: false, repoFilter: [REPO], otherRepoSessions: 1, sessionsWithoutHook: 1,
     ...over,
 });
 
@@ -48,8 +50,8 @@ const render = (t: TelemetryStats, m: TelemetryMeta) =>
     [
         renderToStaticMarkup(<AiUsagePanel telemetry={t} meta={m} mergedPrs={stats.quality.mergedPrs} />),
         renderToStaticMarkup(<TokenUsagePanel telemetry={t} meta={m} />),
-        renderToStaticMarkup(<PrTokenPanel telemetry={t} meta={m} />),
-        renderToStaticMarkup(<UsageVsOutcomePanel telemetry={t} meta={m} />),
+        renderToStaticMarkup(<PrTokenPanel telemetry={t} meta={m} repoCount={1} />),
+        renderToStaticMarkup(<UsageVsOutcomePanel telemetry={t} meta={m} repoCount={1} />),
     ].join('\n');
 
 describe('telemetry panels render', () => {
@@ -111,7 +113,7 @@ describe('telemetry panels render', () => {
                 meta={{
                     fetchedAt: NOW.toISOString(), ageSeconds: 0, stale: false, source: 'fixture',
                     rateLimit: null, revert: { status: 'unavailable', reason: 'no token' },
-                    repo: { owner: 'x', name: 'y' }, baseBranch: 'dev',
+                    repos: [{ owner: 'x', name: 'y' }], baseBranch: 'dev',
                     range: { preset: 'all', from: null, to: null }, telemetry: meta(),
                 }}
             />,

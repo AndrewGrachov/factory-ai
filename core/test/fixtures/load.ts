@@ -9,7 +9,10 @@ let cachedTelemetry: TelemetryInput | null = null;
 export function samplePayload(): RawPullRequest[] {
     if (!cached) {
         const raw = readFileSync(new URL('./sample-payload.json', import.meta.url), 'utf8');
-        cached = JSON.parse(raw) as RawPullRequest[];
+        // The committed JSON carries no repo identity, because a GraphQL response does not: the
+        // repo is knowledge the caller has. Stamped here rather than written into 203 records so
+        // the payload stays a verbatim capture.
+        cached = (JSON.parse(raw) as RawPullRequest[]).map((pr) => ({ ...pr, repo: FIXTURE_REPO }));
     }
     return cached;
 }
@@ -29,6 +32,7 @@ export function sampleTelemetry(): TelemetryInput {
 /** The projection the server passes to attribute(). Built here so both tests agree on it. */
 export function joinKeys(): PrTelemetryKey[] {
     return deriveAll(samplePayload()).map((pr) => ({
+        repo: pr.repo,
         number: pr.number,
         author: pr.author,
         headRefName: pr.headRefName,

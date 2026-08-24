@@ -465,6 +465,7 @@
     "splits": [
         {
             "sessionId": "s01-exact-single",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "ci/pr-review-real-verification",
             "from": "2026-08-21T06:20:00Z",
             "to": "2026-08-21T06:45:00Z",
@@ -483,6 +484,7 @@
         },
         {
             "sessionId": "s02-multi-a",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "LEEL-11082",
             "from": "2026-08-17T08:20:00Z",
             "to": "2026-08-17T08:45:00Z",
@@ -501,6 +503,7 @@
         },
         {
             "sessionId": "s03-multi-b",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "LEEL-11082",
             "from": "2026-08-17T08:46:00Z",
             "to": "2026-08-17T09:02:00Z",
@@ -519,6 +522,7 @@
         },
         {
             "sessionId": "s04-split-window",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "hotfix-0.79.5",
             "from": "2026-04-20T14:30:00Z",
             "to": "2026-04-20T15:02:00Z",
@@ -537,6 +541,7 @@
         },
         {
             "sessionId": "s04-split-window",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "hotfix-0.79.6",
             "from": "2026-04-20T15:10:00Z",
             "to": "2026-04-20T16:00:00Z",
@@ -555,6 +560,7 @@
         },
         {
             "sessionId": "s05-shared-cumulative",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "hotfix-0.79.3",
             "from": "2026-04-15T12:00:00Z",
             "to": "2026-04-15T12:35:00Z",
@@ -573,6 +579,7 @@
         },
         {
             "sessionId": "s05-shared-cumulative",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "LEEL-10674",
             "from": "2026-04-15T12:40:00Z",
             "to": "2026-04-15T14:00:00Z",
@@ -591,6 +598,7 @@
         },
         {
             "sessionId": "s06-reuse-second",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "LEEL-10674",
             "from": "2026-05-12T09:50:00Z",
             "to": "2026-05-12T11:00:00Z",
@@ -609,6 +617,7 @@
         },
         {
             "sessionId": "s07-no-pr",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "chore/scratch-notes",
             "from": "2026-07-10T09:00:00Z",
             "to": "2026-07-10T09:30:00Z",
@@ -627,6 +636,7 @@
         },
         {
             "sessionId": "s08-detached",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": null,
             "from": "2026-07-11T09:00:00Z",
             "to": "2026-07-11T09:20:00Z",
@@ -645,6 +655,7 @@
         },
         {
             "sessionId": "s09-other-repo",
+            "repo": "Leeloo-AI-RGA-OS/other-service",
             "branch": "feat/other-thing",
             "from": "2026-07-12T09:00:00Z",
             "to": "2026-07-12T10:00:00Z",
@@ -663,6 +674,7 @@
         },
         {
             "sessionId": "s11-single-cumulative",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "hotfix-0.80.2",
             "from": "2026-07-21T06:00:00Z",
             "to": "2026-07-21T06:30:00Z",
@@ -681,6 +693,7 @@
         },
         {
             "sessionId": "s12-after-merge",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "hotfix-0.79.3",
             "from": "2026-06-01T09:00:00Z",
             "to": "2026-06-01T09:25:00Z",
@@ -699,6 +712,7 @@
         },
         {
             "sessionId": "s13-open-pr",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "LEEL-11013",
             "from": "2026-08-20T10:00:00Z",
             "to": "2026-08-20T10:50:00Z",
@@ -717,6 +731,7 @@
         },
         {
             "sessionId": "s14-linked",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "LEEL-10995-e2e-stack-improvements",
             "from": "2026-07-02T21:05:00Z",
             "to": "2026-07-02T21:20:00Z",
@@ -735,6 +750,7 @@
         },
         {
             "sessionId": "s15-linked-ambiguous",
+            "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
             "branch": "update-jira-automation",
             "from": "2026-06-29T20:58:00Z",
             "to": "2026-06-29T21:06:00Z",

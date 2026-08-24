@@ -55,11 +55,19 @@ function acceptRatio(accepted: number | null, rejected: number | null): number |
 }
 
 export interface AttributeOptions {
-    /** Only sessions the hook tagged with this repo are counted. */
-    repo?: string;
+    /** Only sessions the hook tagged with one of these repos are counted. */
+    repos?: readonly string[];
     /** Injected so the `partial` week flag is testable against a frozen fixture. */
     now?: Date;
 }
+
+/**
+ * Every map below is keyed by this rather than by `number` or by `branch`. Neither is unique
+ * across repos — two repos routinely both have a PR #204 and a `main` — so keying on either alone
+ * would merge unrelated work into one row and report it as measured.
+ */
+const prKey = (repo: string, number: number) => `${repo}#${number}`;
+const branchKey = (repo: string, branch: string) => `${repo}@${branch}`;
 
 interface WeekBucket {
     week: string;
@@ -122,6 +130,7 @@ function nullRow(
     sessions: number,
 ): PrTelemetryRow {
     return {
+        repo: pr.repo,
         number: pr.number,
         branch: pr.headRefName,
         author: pr.author,
@@ -152,7 +161,8 @@ export function attribute(
     input: TelemetryInput,
     options: AttributeOptions = {},
 ): TelemetryStats {
-    const { repo, now = new Date() } = options;
+    const { repos, now = new Date() } = options;
+    const inRepoScope = (name: string) => repos === undefined || repos.includes(name);
 
     // Three disjoint groups, counted separately because they are three different setup
     // failures: right repo, wrong repo, and no hook at all.
@@ -161,37 +171,38 @@ export function attribute(
     let sessionsWithoutHook = 0;
     for (const session of input.sessions) {
         if (session.repo === null) sessionsWithoutHook += 1;
-        else if (repo !== undefined && session.repo !== repo) otherRepoSessions += 1;
+        else if (!inRepoScope(session.repo)) otherRepoSessions += 1;
         else inScope.push(session);
     }
 
     const scoped = new Set(inScope.map((s) => s.sessionId));
     const byId = new Map(inScope.map((s) => [s.sessionId, s]));
-    const prNumbers = new Set(prs.map((pr) => pr.number));
+    const prKeys = new Set(prs.map((pr) => prKey(pr.repo, pr.number)));
 
     // A transcript pr-link names the PR outright, which beats every branch heuristic below.
     // Group first, because a session that names several in-scope PRs cannot be divided between
     // them any more than a session holding several branches can.
-    const linkedPrs = new Map<string, Set<number>>();
+    const linkedPrs = new Map<string, Set<string>>();
     for (const link of input.links ?? []) {
         if (!scoped.has(link.sessionId)) continue;
-        if (repo !== undefined && link.repo !== repo) continue;
-        if (!prNumbers.has(link.prNumber)) continue;
-        const set = linkedPrs.get(link.sessionId) ?? new Set<number>();
-        set.add(link.prNumber);
+        if (!inRepoScope(link.repo)) continue;
+        const key = prKey(link.repo, link.prNumber);
+        if (!prKeys.has(key)) continue;
+        const set = linkedPrs.get(link.sessionId) ?? new Set<string>();
+        set.add(key);
         linkedPrs.set(link.sessionId, set);
     }
 
-    const linkedByPr = new Map<number, SessionRollup[]>();
-    const ambiguousLinks = new Set<number>();
-    for (const [sessionId, numbers] of linkedPrs) {
+    const linkedByPr = new Map<string, SessionRollup[]>();
+    const ambiguousLinks = new Set<string>();
+    for (const [sessionId, keys] of linkedPrs) {
         const session = byId.get(sessionId);
         if (!session) continue;
-        if (numbers.size > 1) {
-            for (const n of numbers) ambiguousLinks.add(n);
+        if (keys.size > 1) {
+            for (const key of keys) ambiguousLinks.add(key);
             continue;
         }
-        const only = [...numbers][0] as number;
+        const only = [...keys][0] as string;
         linkedByPr.set(only, [...(linkedByPr.get(only) ?? []), session]);
     }
 
@@ -208,39 +219,43 @@ export function attribute(
     // the first PR that was still open when the work happened.
     const candidates = new Map<string, PrTelemetryKey[]>();
     for (const pr of prs) {
-        const list = candidates.get(pr.headRefName) ?? [];
+        const key = branchKey(pr.repo, pr.headRefName);
+        const list = candidates.get(key) ?? [];
         list.push(pr);
-        candidates.set(pr.headRefName, list);
+        candidates.set(key, list);
     }
     // An open PR is still accepting work, so it sorts last and catches anything later.
     const closesAt = (pr: PrTelemetryKey) => pr.mergedAt ?? '9999';
     for (const list of candidates.values()) list.sort((a, b) => closesAt(a).localeCompare(closesAt(b)));
 
-    const byPr = new Map<number, SessionSpanSplit[]>();
+    const byPr = new Map<string, SessionSpanSplit[]>();
     const orphans: SessionSpanSplit[] = [];
     for (const split of splits) {
         // A null branch is detached HEAD: it matches no PR, and must not be coerced into one.
-        const list = split.branch === null ? undefined : candidates.get(split.branch);
+        const list =
+            split.branch === null ? undefined : candidates.get(branchKey(split.repo, split.branch));
         const owner = list?.find((pr) => closesAt(pr) >= split.from);
         if (!owner) {
             // Either no PR used this branch, or every PR on it merged before the work started.
             orphans.push(split);
             continue;
         }
-        byPr.set(owner.number, [...(byPr.get(owner.number) ?? []), split]);
+        const key = prKey(owner.repo, owner.number);
+        byPr.set(key, [...(byPr.get(key) ?? []), split]);
     }
 
     const rows: PrTelemetryRow[] = [];
     let prsWithoutTelemetry = 0;
     for (const pr of prs) {
+        const key = prKey(pr.repo, pr.number);
         // A session named this PR alongside others, so its usage cannot be placed on either.
-        if (ambiguousLinks.has(pr.number)) {
+        if (ambiguousLinks.has(key)) {
             rows.push(nullRow(pr, 'shared', 0));
             continue;
         }
 
-        const linked = linkedByPr.get(pr.number) ?? [];
-        const matched = byPr.get(pr.number) ?? [];
+        const linked = linkedByPr.get(key) ?? [];
+        const matched = byPr.get(key) ?? [];
 
         // Both sources contribute to the same row. Folding them together rather than letting
         // the stronger tier win outright is what keeps the partition whole: a PR named by one
@@ -271,6 +286,7 @@ export function attribute(
         const billable = billableTokens(tokens);
 
         rows.push({
+            repo: pr.repo,
             number: pr.number,
             branch: pr.headRefName,
             author: pr.author,
@@ -311,7 +327,16 @@ export function attribute(
         unmatched: {
             sessions: new Set(orphans.map((s) => s.sessionId)).size,
             tokens: sumTokens(orphans),
-            branches: [...new Set(orphans.map((s) => s.branch).filter((b): b is string => b !== null))].sort(),
+            branches: [
+                ...new Map(
+                    orphans
+                        .filter((s) => s.branch !== null)
+                        .map((s) => [
+                            branchKey(s.repo, s.branch as string),
+                            { repo: s.repo, branch: s.branch as string },
+                        ]),
+                ).values(),
+            ].sort((a, b) => a.repo.localeCompare(b.repo) || a.branch.localeCompare(b.branch)),
         },
         prsWithoutTelemetry,
         sharedSessions:

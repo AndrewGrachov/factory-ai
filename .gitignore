@@ -6,4 +6,5 @@ artifacts/
 playwright-report/
 .env
 .env.local
+factory.toml
 .DS_Store

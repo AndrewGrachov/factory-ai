@@ -3,6 +3,12 @@ export interface Actor {
 }
 
 export interface RawPullRequest {
+    /**
+     * "owner/name". Stamped by the client as it maps each repo's response, because the GraphQL
+     * query is per-repo and the payload itself carries no repo identity. A PR number is only
+     * unique within a repo, so the combined view needs this to say which #204 it means.
+     */
+    repo: string;
     number: number;
     title: string;
     state: 'OPEN' | 'CLOSED' | 'MERGED';
@@ -68,6 +74,8 @@ export interface DerivedReview {
 }
 
 export interface DerivedPr {
+    /** "owner/name", carried through from RawPullRequest. */
+    repo: string;
     number: number;
     title: string;
     author: string;
@@ -110,6 +118,7 @@ export interface BranchHistory {
 }
 
 export interface TruncatedPr {
+    repo: string;
     number: number;
     connections: string[];
 }
@@ -208,6 +217,8 @@ export interface SessionRollup {
 /** Per-(session, branch) allocation, computed by time containment where the timestamps live. */
 export interface SessionSpanSplit {
     sessionId: string;
+    /** From the span. A branch name is only unique within a repo, so the join needs both. */
+    repo: string;
     branch: string | null;
     /** The interval this allocation covers. Needed because a branch is not a unique key —
      *  the sample payload reuses several head branches across separate PRs. */
@@ -251,6 +262,7 @@ export interface TelemetryInput {
  * change there cannot silently alter telemetry output.
  */
 export interface PrTelemetryKey {
+    repo: string;
     number: number;
     author: string;
     headRefName: string;
@@ -262,6 +274,7 @@ export interface PrTelemetryKey {
 }
 
 export interface PrTelemetryRow {
+    repo: string;
     number: number;
     branch: string;
     author: string;
@@ -313,7 +326,11 @@ export interface TelemetryStats {
     };
     prs: PrTelemetryRow[];
     /** Work on branches matching no PR: dead ends, or a PR outside the fetch window. */
-    unmatched: { sessions: number; tokens: TokenTotals; branches: string[] };
+    /**
+     * `branches` carries the repo because a branch name is not unique across repos: two repos
+     * both having an unmatched `main` must read as two entries, not one.
+     */
+    unmatched: { sessions: number; tokens: TokenTotals; branches: { repo: string; branch: string }[] };
     /** PRs in the window with no session at all — merged before the plugin, or written without AI. */
     prsWithoutTelemetry: number;
     /** Sessions that held several branches, or named several PRs, and could not be divided. */
@@ -375,7 +392,7 @@ export interface Stats {
     };
     size: {
         histogram: { label: string; count: number }[];
-        scatter: { number: number; size: number; hours: number; botThreads: number }[];
+        scatter: { repo: string; number: number; size: number; hours: number; botThreads: number }[];
         medianChangedFiles: number | null;
     };
     commitsHistogram: { label: string; count: number }[];

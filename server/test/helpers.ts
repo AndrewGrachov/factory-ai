@@ -9,9 +9,17 @@ import type { TelemetryClient, TelemetryHealth } from '../src/telemetry/client.j
 const FIXTURE = new URL('../../core/test/fixtures/sample-payload.json', import.meta.url);
 const TELEMETRY_FIXTURE = new URL('../../core/test/fixtures/telemetry-sessions.json', import.meta.url);
 
+export const TEST_REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
+
 let payload: RawPullRequest[] | null = null;
 export function samplePrs(): RawPullRequest[] {
-    if (!payload) payload = JSON.parse(readFileSync(FIXTURE, 'utf8')) as RawPullRequest[];
+    if (!payload) {
+        // Stamped, like both real clients do: the captured response has no repo identity of its own.
+        payload = (JSON.parse(readFileSync(FIXTURE, 'utf8')) as RawPullRequest[]).map((pr) => ({
+            ...pr,
+            repo: TEST_REPO,
+        }));
+    }
     return payload;
 }
 
@@ -33,7 +41,7 @@ export const EMPTY_TELEMETRY: TelemetryInput = {
 
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     return {
-        repo: { owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' },
+        repos: [{ owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' }],
         baseBranch: 'dev',
         bots: ['claude', 'claude[bot]', 'github-actions', 'github-actions[bot]', 'leeloo-frontend-fix-bot'],
         cacheTtlMs: 900_000,
@@ -44,13 +52,14 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         telemetrySource: 'fixture',
         databaseUrl: null,
         telemetryTtlMs: 30_000,
-        telemetryRepo: 'Leeloo-AI-RGA-OS/leeloo.ai',
+        repoNames: [TEST_REPO],
         ...overrides,
     };
 }
 
 export interface StubOptions {
     prs?: () => Promise<PullRequestsResult>;
+    /** A single repo's history. The stub wraps it into the per-repo list the client returns. */
     history?: () => Promise<BranchHistory | null>;
 }
 
@@ -68,10 +77,12 @@ export function stubClient(options: StubOptions = {}): Stub {
             if (options.prs) return options.prs();
             return { prs: structuredClone(samplePrs()), truncated: [], rateLimit: null };
         },
-        async fetchBranchHistory() {
+        async fetchBranchHistories() {
             stub.historyCalls += 1;
-            if (options.history) return options.history();
-            return { branch: 'dev', since: '2026-04-03T00:00:00Z', commits: 515, reverts: 5 };
+            const history = options.history
+                ? await options.history()
+                : { branch: 'dev', since: '2026-04-03T00:00:00Z', commits: 515, reverts: 5 };
+            return [{ repo: TEST_REPO, history }];
         },
     };
     return stub;

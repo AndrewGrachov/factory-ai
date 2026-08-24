@@ -5,7 +5,7 @@ import { FIXTURE_NOW, FIXTURE_REPO, joinKeys, sampleTelemetry } from './fixtures
 
 const input = sampleTelemetry();
 const prs = joinKeys();
-const stats = attribute(prs, input, { repo: FIXTURE_REPO, now: FIXTURE_NOW });
+const stats = attribute(prs, input, { repos: [FIXTURE_REPO], now: FIXTURE_NOW });
 
 const row = (number: number): PrTelemetryRow => {
     const found = stats.prs.find((r) => r.number === number);
@@ -165,7 +165,7 @@ describe('a transcript pr-link outranks the branch join', () => {
             (r) => r.branch === 'LEEL-10995-e2e-stack-improvements' && r.attribution === 'exact',
         );
         expect(viaBranch).toEqual([]);
-        expect(stats.unmatched.branches).not.toContain('LEEL-10995-e2e-stack-improvements');
+        expect(stats.unmatched.branches.map((b) => b.branch)).not.toContain('LEEL-10995-e2e-stack-improvements');
     });
 
     it('marks both PRs shared when one session opened two of them', () => {
@@ -195,7 +195,7 @@ describe('a head branch is not a unique key', () => {
 
     it('does not back-date work onto a PR that had already merged', () => {
         // s12-after-merge worked on hotfix-0.79.3 six weeks after #5 merged.
-        expect(stats.unmatched.branches).toContain('hotfix-0.79.3');
+        expect(stats.unmatched.branches).toContainEqual({ repo: FIXTURE_REPO, branch: 'hotfix-0.79.3' });
         expect(row(5).tokens.input).toBeNull();
     });
 });
@@ -249,13 +249,16 @@ describe('the null-not-zero contract', () => {
 
 describe('work that reaches no PR', () => {
     it('reports it rather than dropping or folding it into the totals', () => {
-        expect(stats.unmatched.branches).toEqual(['chore/scratch-notes', 'hotfix-0.79.3']);
+        expect(stats.unmatched.branches).toEqual([
+            { repo: FIXTURE_REPO, branch: 'chore/scratch-notes' },
+            { repo: FIXTURE_REPO, branch: 'hotfix-0.79.3' },
+        ]);
         expect(stats.unmatched.sessions).toBe(3); // no-pr, detached, after-merge
         expect(stats.unmatched.tokens.input).toBe(12000 + 7000 + 9000);
     });
 
     it('never matches a detached HEAD to a PR', () => {
-        expect(stats.unmatched.branches).not.toContain(null);
+        expect(stats.unmatched.branches.map((b) => b.branch)).not.toContain(null);
         expect(stats.prs.every((r) => r.branch !== null)).toBe(true);
     });
 
@@ -321,7 +324,7 @@ describe('output invariants', () => {
 
 describe('degradation', () => {
     it('reports an empty store as zero sessions with null tokens, not zeros', () => {
-        const empty = attribute(prs, { sessions: [], spans: [], splits: [], links: [], coverage: { from: null, to: null } }, { repo: FIXTURE_REPO, now: FIXTURE_NOW });
+        const empty = attribute(prs, { sessions: [], spans: [], splits: [], links: [], coverage: { from: null, to: null } }, { repos: [FIXTURE_REPO], now: FIXTURE_NOW });
         expect(empty.totals.sessions).toBe(0);
         expect(empty.totals.tokens.input).toBeNull();
         expect(empty.totals.acceptRatio).toBeNull();
@@ -336,5 +339,137 @@ describe('degradation', () => {
         expect(all.otherRepoSessions).toBe(0);
         expect(all.sessionsWithoutHook).toBe(1);
         expect(all.totals.sessions).toBe(input.sessions.length - 1);
+    });
+});
+
+/**
+ * The reason `repo` is threaded through DerivedPr at all. Every map in attribute() used to be
+ * keyed by PR number or by branch name, and neither is unique once a second repo is in scope —
+ * so a combined view would have reported one repo's tokens on the other repo's PR, with an
+ * 'exact' label on it.
+ */
+describe('a branch is not unique across repos', () => {
+    const A = 'acme/alpha';
+    const B = 'acme/beta';
+    const key = (repo: string) => ({
+        repo,
+        number: 7,
+        author: 'dev',
+        headRefName: 'feature/shared-name',
+        createdAt: '2026-07-01T00:00:00Z',
+        mergedAt: '2026-07-10T00:00:00Z',
+        size: 100,
+        cycleHours: 24,
+        commitsAfterHumanReview: 0,
+    });
+
+    const tokensFor = (input: number) => ({
+        input,
+        output: 0,
+        cacheRead: null,
+        cacheCreation: null,
+    });
+
+    const span = (sessionId: string, repo: string) => ({
+        sessionId,
+        repo,
+        branch: 'feature/shared-name',
+        headSha: null,
+        from: '2026-07-05T00:00:00Z',
+        to: '2026-07-05T01:00:00Z',
+        samples: 3,
+    });
+
+    const session = (sessionId: string, repo: string, input: number) => ({
+        sessionId,
+        agent: 'claude-code',
+        repo,
+        firstSeen: '2026-07-05T00:00:00Z',
+        lastSeen: '2026-07-05T01:00:00Z',
+        tokens: tokensFor(input),
+        linesAdded: 10,
+        linesRemoved: 0,
+        editsAccepted: 1,
+        editsRejected: 0,
+        activeSeconds: 60,
+        commits: 0,
+        pullRequests: 0,
+        granularity: 'window' as const,
+    });
+
+    const split = (sessionId: string, repo: string, input: number) => ({
+        sessionId,
+        repo,
+        branch: 'feature/shared-name',
+        from: '2026-07-05T00:00:00Z',
+        to: '2026-07-05T01:00:00Z',
+        share: 1,
+        tokens: tokensFor(input),
+        linesAdded: 10,
+        linesRemoved: 0,
+        editsAccepted: 1,
+        editsRejected: 0,
+        activeSeconds: 60,
+    });
+
+    // Both repos have a PR #7 on a branch of the same name, worked in the same hour.
+    const crossRepo = attribute(
+        [key(A), key(B)],
+        {
+            sessions: [session('s-a', A, 1000), session('s-b', B, 2000)],
+            spans: [span('s-a', A), span('s-b', B)],
+            splits: [split('s-a', A, 1000), split('s-b', B, 2000)],
+            links: [],
+            coverage: { from: '2026-07-01T00:00:00Z', to: '2026-07-31T00:00:00Z' },
+        },
+        { repos: [A, B], now: new Date('2026-07-31T00:00:00Z') },
+    );
+
+    const rowFor = (repo: string) => {
+        const found = crossRepo.prs.find((r) => r.repo === repo);
+        if (!found) throw new Error(`no row for ${repo}`);
+        return found;
+    };
+
+    it('keeps each repo\u2019s work on its own PR', () => {
+        expect(crossRepo.prs).toHaveLength(2);
+        expect(rowFor(A).tokens.input).toBe(1000);
+        expect(rowFor(B).tokens.input).toBe(2000);
+    });
+
+    it('does not report the collision as shared or unmatched', () => {
+        // Keying by branch alone made both sessions candidates for both PRs. That reads as
+        // 'shared' at best and as a doubled 'exact' at worst — never as two clean rows.
+        expect(rowFor(A).attribution).toBe('exact');
+        expect(rowFor(B).attribution).toBe('exact');
+        expect(rowFor(A).sessions).toBe(1);
+        expect(rowFor(B).sessions).toBe(1);
+        expect(crossRepo.unmatched.sessions).toBe(0);
+        expect(crossRepo.prsWithoutTelemetry).toBe(0);
+    });
+
+    it('conserves the total across the two rows', () => {
+        expect(crossRepo.totals.tokens.input).toBe(3000);
+        expect(billable(rowFor(A).tokens) + billable(rowFor(B).tokens)).toBe(3000);
+    });
+
+    it('separates identically named unmatched branches by repo', () => {
+        const orphaned = attribute(
+            [],
+            {
+                sessions: [session('s-a', A, 1000), session('s-b', B, 2000)],
+                spans: [span('s-a', A), span('s-b', B)],
+                splits: [split('s-a', A, 1000), split('s-b', B, 2000)],
+                links: [],
+                coverage: { from: '2026-07-01T00:00:00Z', to: '2026-07-31T00:00:00Z' },
+            },
+            { repos: [A, B], now: new Date('2026-07-31T00:00:00Z') },
+        );
+        // One entry per repo. Collapsing them to a single "feature/shared-name" would understate
+        // how much work reached no PR.
+        expect(orphaned.unmatched.branches).toEqual([
+            { repo: A, branch: 'feature/shared-name' },
+            { repo: B, branch: 'feature/shared-name' },
+        ]);
     });
 });

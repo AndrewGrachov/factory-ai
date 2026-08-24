@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { loadConfig } from '../config.js';
+import { resolveConfig } from '../config-file.js';
 import { migrate } from '../db/migrate.js';
 import { backfillTranscripts } from './transcripts.js';
 
@@ -9,9 +9,11 @@ import { backfillTranscripts } from './transcripts.js';
  * Reads Claude Code transcripts from disk and imports them. Safe to re-run: rows land with
  * `source = 'transcript'` and the dedup index makes a second pass a no-op.
  */
-const config = loadConfig();
+const { config } = resolveConfig();
 if (!config.databaseUrl) {
-    console.error('backfill requires DATABASE_URL (and TELEMETRY_SOURCE=postgres to see the result)');
+    console.error(
+        'backfill requires DATABASE_URL or telemetry.database_url (and TELEMETRY_SOURCE=postgres to see the result)',
+    );
     process.exit(1);
 }
 

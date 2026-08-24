@@ -25,7 +25,7 @@ describe('telemetry on /api/stats', () => {
 
         expect(body.meta.telemetry.status).toBe('ok');
         expect(body.meta.telemetry.source).toBe('fixture');
-        expect(body.meta.telemetry.repoFilter).toBe('Leeloo-AI-RGA-OS/leeloo.ai');
+        expect(body.meta.telemetry.repoFilter).toEqual(['Leeloo-AI-RGA-OS/leeloo.ai']);
         expect(body.telemetry.totals.sessions).toBe(13);
         expect(body.telemetry.totals.tokens.input).toBeGreaterThan(0);
         expect(body.telemetry.prs.find((r: { number: number }) => r.number === 204).attribution).toBe('exact');
@@ -251,6 +251,6 @@ describe('loadConfig', () => {
         const config = loadConfig({});
         expect(config.telemetrySource).toBe('fixture');
         expect(config.telemetryTtlMs).toBe(30_000);
-        expect(config.telemetryRepo).toBe('Leeloo-AI-RGA-OS/leeloo.ai');
+        expect(config.repoNames).toEqual(['Leeloo-AI-RGA-OS/leeloo.ai']);
     });
 });

@@ -3,8 +3,14 @@ import type { TelemetrySource } from './telemetry/client.js';
 
 export type DataSource = 'github' | 'fixture';
 
+export interface Repo {
+    readonly owner: string;
+    readonly name: string;
+}
+
 export interface AppConfig {
-    readonly repo: { readonly owner: string; readonly name: string };
+    /** The landing page reports every one of these combined. Never empty. */
+    readonly repos: readonly Repo[];
     readonly baseBranch: string;
     readonly bots: readonly string[];
     readonly cacheTtlMs: number;
@@ -15,13 +21,19 @@ export interface AppConfig {
     readonly telemetrySource: TelemetrySource;
     readonly databaseUrl: string | null;
     readonly telemetryTtlMs: number;
-    /** Only sessions the hook tagged with this repo count toward the dashboard. */
-    readonly telemetryRepo: string;
+    /**
+     * "owner/name" for each configured repo — the form the hook reports and the form stamped onto
+     * every PR. Derived rather than configurable: a separate telemetry repo list is a second
+     * source of truth that silently drops sessions the moment it drifts from `repos`.
+     */
+    readonly repoNames: readonly string[];
 }
 
 // A full fetch costs ~243 rate-limit points and ~45s against a 5000/hour budget, so a
-// short TTL would let a handful of reloads exhaust the quota.
-const MIN_TTL_SECONDS = 300;
+// short TTL would let a handful of reloads exhaust the quota. Per repo, because the cost is
+// paid once per repo: the floor has to scale with the list or the guard weakens as repos are
+// added, which is exactly when it matters most.
+const MIN_TTL_SECONDS_PER_REPO = 300;
 
 // Not a typo next to the 300s above: the reasons are opposite. A telemetry read is a local
 // query with no quota to protect, so the floor exists only to stop a hot loop.
@@ -45,10 +57,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         throw new Error('DATA_SOURCE=github requires GITHUB_TOKEN');
     }
 
-    const ttlSeconds = int(env.CACHE_TTL_SECONDS, 900, 'CACHE_TTL_SECONDS');
-    if (ttlSeconds < MIN_TTL_SECONDS) {
+    const owner = env.GITHUB_OWNER ?? 'Leeloo-AI-RGA-OS';
+    const names = env.GITHUB_REPOS
+        ? env.GITHUB_REPOS.split(',')
+              .map((entry) => entry.trim())
+              .filter(Boolean)
+        : ['leeloo.ai'];
+    if (!names.length) throw new Error('GITHUB_REPOS lists no repositories');
+    // A bare name takes GITHUB_OWNER; a qualified "other-owner/name" keeps its own, so one
+    // dashboard can span organisations without a second owner setting.
+    const repos: Repo[] = names.map((entry) => {
+        const slash = entry.indexOf('/');
+        if (slash === -1) return { owner, name: entry };
+        const [entryOwner, entryName] = [entry.slice(0, slash), entry.slice(slash + 1)];
+        if (!entryOwner || !entryName || entryName.includes('/')) {
+            throw new Error(`GITHUB_REPOS entry "${entry}" must be "name" or "owner/name"`);
+        }
+        return { owner: entryOwner, name: entryName };
+    });
+
+    const minTtlSeconds = MIN_TTL_SECONDS_PER_REPO * repos.length;
+    const ttlSeconds = int(env.CACHE_TTL_SECONDS, Math.max(900, minTtlSeconds), 'CACHE_TTL_SECONDS');
+    if (ttlSeconds < minTtlSeconds) {
         throw new Error(
-            `CACHE_TTL_SECONDS must be at least ${MIN_TTL_SECONDS}; a full fetch costs ~243 rate-limit points`,
+            `CACHE_TTL_SECONDS must be at least ${minTtlSeconds} for ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}; a full fetch costs ~243 rate-limit points per repo`,
         );
     }
 
@@ -73,11 +105,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
               .filter(Boolean)
         : DEFAULT_BOTS;
 
-    const owner = env.GITHUB_OWNER ?? 'Leeloo-AI-RGA-OS';
-    const name = env.GITHUB_REPO ?? 'leeloo.ai';
-
     return Object.freeze({
-        repo: Object.freeze({ owner, name }),
+        repos: Object.freeze(repos.map((repo) => Object.freeze(repo))),
         baseBranch: env.BASE_BRANCH ?? 'dev',
         bots: Object.freeze(bots),
         cacheTtlMs: ttlSeconds * 1000,
@@ -88,6 +117,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         telemetrySource,
         databaseUrl: env.DATABASE_URL ?? null,
         telemetryTtlMs: telemetryTtlSeconds * 1000,
-        telemetryRepo: env.TELEMETRY_REPO ?? `${owner}/${name}`,
+        repoNames: Object.freeze(repos.map((repo) => `${repo.owner}/${repo.name}`)),
     });
 }

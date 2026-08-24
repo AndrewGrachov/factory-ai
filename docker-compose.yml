@@ -10,7 +10,8 @@ services:
             DATA_SOURCE: ${DATA_SOURCE:-fixture}
             GITHUB_TOKEN: ${GITHUB_TOKEN:-}
             GITHUB_OWNER: ${GITHUB_OWNER:-Leeloo-AI-RGA-OS}
-            GITHUB_REPO: ${GITHUB_REPO:-leeloo.ai}
+            # Comma-separated; every repo listed is reported combined.
+            GITHUB_REPOS: ${GITHUB_REPOS:-leeloo.ai}
             BASE_BRANCH: ${BASE_BRANCH:-dev}
             CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-900}
             # postgres, not fixture: this file provisions the database AND the collector, so
@@ -20,6 +21,14 @@ services:
             TELEMETRY_SOURCE: ${TELEMETRY_SOURCE:-postgres}
             TELEMETRY_TTL_SECONDS: ${TELEMETRY_TTL_SECONDS:-30}
             DATABASE_URL: postgres://factory:factory@timescale:5432/factory_dev
+            FACTORY_CONFIG: ${FACTORY_CONFIG:-}
+        # A factory.toml has to be mounted in, since it is gitignored and dockerignored and so
+        # never enters the image. Left commented because compose errors out when a mount source
+        # is missing, which would break `docker compose up` for anyone without the file.
+        # Note that every variable above is a *real* value, not an absent one, so it wins over
+        # the file — env-first stays the container's contract.
+        # volumes:
+        #     - ./factory.toml:/app/factory.toml:ro
         depends_on:
             timescale:
                 condition: service_healthy

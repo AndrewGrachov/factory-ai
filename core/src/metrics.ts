@@ -107,6 +107,7 @@ export function derive(pr: RawPullRequest, bots: Set<string> = defaultBots()): D
     const mergedMs = mergedAt ? new Date(mergedAt).getTime() : null;
 
     return {
+        repo: pr.repo,
         number: pr.number,
         title: pr.title,
         author: login(pr.author),
@@ -442,6 +443,7 @@ export function compute(all: DerivedPr[], options: ComputeOptions = {}): Stats {
             scatter: merged
                 .filter((pr) => pr.cycleHours !== null && pr.size > 0)
                 .map((pr) => ({
+                    repo: pr.repo,
                     number: pr.number,
                     size: pr.size,
                     hours: pr.cycleHours as number,

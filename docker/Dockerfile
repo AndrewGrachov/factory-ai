@@ -32,6 +32,8 @@ COPY --from=build /app/core/test/fixtures/telemetry-sessions.json core/test/fixt
 # tsc does not compile .sql, so the migrations have to be copied by hand. Forgetting this
 # fails only in the container, never in dev.
 COPY --from=build /app/server/migrations server/migrations
+# No COPY for factory.toml, despite the precedent just above: it carries a GitHub token, so it
+# has to arrive as a read-only mount or as environment, never baked into an image layer.
 ENV WEB_ROOT=/app/web/dist
 ENV HOST=0.0.0.0
 USER node

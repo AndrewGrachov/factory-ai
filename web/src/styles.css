@@ -320,6 +320,12 @@ main {
     fill: var(--bad);
 }
 
+/* Cells are nowrap, so a wide table overflows its panel rather than shrinking. Scrolling keeps
+   the rightmost columns reachable; without this they are clipped with no indication. */
+.table-wrap {
+    overflow-x: auto;
+}
+
 table.data {
     width: 100%;
     border-collapse: collapse;

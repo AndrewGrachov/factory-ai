@@ -1,0 +1,53 @@
+# Copy to factory.toml and chmod 600 — it holds a GitHub token.
+#
+#     cp factory.toml.example factory.toml && chmod 600 factory.toml
+#
+# Every key here can be overridden by the matching environment variable, so `.env` and
+# `docker compose` keep working unchanged and win where they disagree. Set FACTORY_CONFIG to read
+# this from somewhere else; the file is optional and its absence is not an error.
+#
+# An unknown or misspelled key here is fatal, unlike an unrecognised environment variable: a
+# tolerated typo would boot the dashboard on fixture data and look like a missing token.
+
+[github]
+# `github` hits the live API; `fixture` serves the committed 203-PR payload with no token.
+source = "fixture"
+
+# Fine-grained PAT. Required scopes:
+#   Metadata: read
+#   Pull requests: read
+#   Contents: read   <- only for the revert rate; without it that one metric reports "unavailable"
+token = ""
+
+owner = "ExampleOwner"
+
+# The landing page reports every repo here combined. An entry may be a bare name, which takes the
+# owner above, or a fully qualified "other-owner/name".
+#
+# Cost scales: a full fetch is ~243 rate-limit points PER repo against a 5000/hour budget, so the
+# cache TTL floor below is multiplied by the number of repos listed.
+repos = ["leeloo.ai"]
+
+base_branch = "dev"
+
+# Reviewers listed here are classed as bots. An entry cannot contain a comma.
+bots = ["claude", "claude[bot]", "github-actions", "github-actions[bot]", "leeloo-frontend-fix-bot"]
+
+[server]
+port = 8080
+host = "127.0.0.1"
+
+[cache]
+# A full fetch costs ~243 rate-limit points and ~45s, so the floor is 300.
+ttl_seconds = 900
+
+[telemetry]
+# `postgres` reports real sessions; `fixture` serves synthetic numbers the UI badges as such;
+# `off` renders no AI panels at all.
+source = "fixture"
+
+# Required by source = "postgres".
+database_url = ""
+
+# No quota to protect here, only a hot loop to prevent, so the floor is 5 rather than 300.
+ttl_seconds = 30

@@ -17,6 +17,16 @@ export function duration(hours: number | null | undefined): string {
 }
 
 /**
+ * A PR number is only unique within its repo, so a combined view showing a bare "#204" is
+ * ambiguous the moment a second repo is in scope. Qualified only when it has to be: prefixing
+ * every row on a single-repo dashboard is noise that teaches the reader to ignore the prefix.
+ */
+export function prLabel(repo: string, number: number, repoCount: number): string {
+    if (repoCount < 2) return `#${number}`;
+    return `${repo.slice(repo.indexOf('/') + 1)}#${number}`;
+}
+
+/**
  * Rounded on purpose. The branch attribution behind these figures is a ~20s sample from a
  * hook that is allowed to fail, so "92.4k" is the honest precision and "92,431" is not.
  */

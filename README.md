@@ -26,7 +26,16 @@ npm install
 # Fixture mode: the committed 203-PR payload, no token, no rate-limit cost.
 npm run dev
 
-# Live mode
+# Live mode, via the config file
+cp factory.toml.example factory.toml && chmod 600 factory.toml   # set github.source and github.token
+npm run dev
+
+# Several repos, reported combined on one page. Cost is ~243 rate-limit points per repo, so the
+# cache TTL floor rises to 300s x the number of repos.
+#   [github]
+#   repos = ["leeloo.ai", "leeloo-infra"]
+
+# Live mode, via the environment instead — it overrides factory.toml wherever they disagree
 cp .env.example .env   # set DATA_SOURCE=github and GITHUB_TOKEN
 npm run dev
 ```

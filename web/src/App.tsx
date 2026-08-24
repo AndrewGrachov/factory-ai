@@ -39,7 +39,7 @@ export function App() {
                             <ReworkPanel stats={data.stats} />
                         </div>
                         <div className="two-up">
-                            <SizePanel stats={data.stats} />
+                            <SizePanel stats={data.stats} repoCount={data.meta.repos.length} />
                             <CommitsPanel stats={data.stats} />
                         </div>
                         <AuthorsPanel stats={data.stats} />
@@ -56,10 +56,15 @@ export function App() {
                                     telemetry={data.telemetry}
                                     meta={data.meta.telemetry}
                                 />
-                                <PrTokenPanel telemetry={data.telemetry} meta={data.meta.telemetry} />
+                                <PrTokenPanel
+                                    telemetry={data.telemetry}
+                                    meta={data.meta.telemetry}
+                                    repoCount={data.meta.repos.length}
+                                />
                                 <UsageVsOutcomePanel
                                     telemetry={data.telemetry}
                                     meta={data.meta.telemetry}
+                                    repoCount={data.meta.repos.length}
                                 />
                             </>
                         ) : null}

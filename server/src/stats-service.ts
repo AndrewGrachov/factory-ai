@@ -36,7 +36,7 @@ export interface TelemetryMeta {
     fetchedAt: string | null;
     ageSeconds: number | null;
     stale: boolean;
-    repoFilter: string;
+    repoFilter: readonly string[];
     /** Sessions the hook attributed to a different repo. */
     otherRepoSessions: number;
     /** Sessions with telemetry but no hook data — the plugin is missing, or failing. */
@@ -62,6 +62,8 @@ export interface TelemetrySnapshot {
 export interface FetchState {
     state: 'idle' | 'loading' | 'error';
     phase: 'prs' | 'backfill' | 'history' | null;
+    /** Which repo the fetch is on. With several configured, a cold start is N times as long. */
+    repo: string | null;
     prsFetched: number | null;
     backfillingPr: number | null;
     historyScanned: number | null;
@@ -84,7 +86,8 @@ export interface StatsPayload {
         source: 'live' | 'fixture';
         rateLimit: RateLimit | null;
         revert: RevertStatus;
-        repo: { owner: string; name: string };
+        /** Every repo in the combined view. Per-repo pages will filter this, not refetch. */
+        repos: { owner: string; name: string }[];
         baseBranch: string;
         range: DateRange;
         telemetry: TelemetryMeta;
@@ -111,6 +114,7 @@ function idleState(): FetchState {
     return {
         state: 'idle',
         phase: null,
+        repo: null,
         prsFetched: null,
         backfillingPr: null,
         historyScanned: null,
@@ -137,6 +141,7 @@ const TELEMETRY_COOLDOWN_MS = 5_000;
 /** Deliberately not DerivedPr, so a change there cannot silently alter telemetry output. */
 function toJoinKey(pr: DerivedPr): PrTelemetryKey {
     return {
+        repo: pr.repo,
         number: pr.number,
         author: pr.author,
         headRefName: pr.headRefName,
@@ -165,6 +170,7 @@ export function createStatsService({
             fetchState = {
                 ...fetchState,
                 phase: p.phase,
+                repo: p.repo ?? fetchState.repo,
                 prsFetched: p.prsFetched ?? fetchState.prsFetched,
                 backfillingPr: p.backfillingPr ?? fetchState.backfillingPr,
                 historyScanned: p.historyScanned ?? fetchState.historyScanned,
@@ -188,13 +194,26 @@ export function createStatsService({
             let revert: RevertStatus = { status: 'unavailable', reason: 'No merged PRs to bound the history query' };
             if (earliest) {
                 try {
-                    history = await client.fetchBranchHistory(earliest, { onProgress });
-                    revert = history
-                        ? { status: 'ok', reason: null }
-                        : {
-                              status: 'unavailable',
-                              reason: `Branch ${config.baseBranch} is not readable with this token (Contents: read missing?)`,
-                          };
+                    const histories = await client.fetchBranchHistories(earliest, { onProgress });
+                    const unreadable = histories.filter((h) => h.history === null).map((h) => h.repo);
+                    if (unreadable.length) {
+                        // Summing the repos that DID resolve would produce a plausible number
+                        // measured over an unknown subset — the one failure this metric's
+                        // null-not-zero contract exists to prevent. All or nothing.
+                        history = null;
+                        revert = {
+                            status: 'unavailable',
+                            reason: `Branch ${config.baseBranch} is not readable in ${unreadable.join(', ')} with this token (Contents: read missing?)`,
+                        };
+                    } else {
+                        history = {
+                            branch: config.baseBranch,
+                            since: earliest,
+                            commits: histories.reduce((n, h) => n + (h.history as BranchHistory).commits, 0),
+                            reverts: histories.reduce((n, h) => n + (h.history as BranchHistory).reverts, 0),
+                        };
+                        revert = { status: 'ok', reason: null };
+                    }
                 } catch (e) {
                     revert = {
                         status: 'unavailable',
@@ -221,7 +240,7 @@ export function createStatsService({
 
     async function produceTelemetry(): Promise<TelemetrySnapshot> {
         try {
-            const input = await telemetry.fetchRollups({ repo: config.telemetryRepo });
+            const input = await telemetry.fetchRollups({ repos: config.repoNames });
             telemetryFailure = null;
             return { input };
         } catch (e) {
@@ -259,7 +278,7 @@ export function createStatsService({
         const source = config.telemetrySource === 'postgres' ? 'postgres' : 'fixture';
         const base = {
             source,
-            repoFilter: config.telemetryRepo,
+            repoFilter: config.repoNames,
             otherRepoSessions: stats?.otherRepoSessions ?? 0,
             sessionsWithoutHook: stats?.sessionsWithoutHook ?? 0,
         } as const;
@@ -310,11 +329,13 @@ export function createStatsService({
                       reason: 'Revert rate is measured over the full fetch window, not a selected range',
                   };
 
-            const inRange = new Set(prs.map((pr) => pr.number));
+            // Keyed by repo and number: a PR number alone is not unique across repos, so #204 in
+            // one repo would drag #204's truncation notice in from another.
+            const inRange = new Set(prs.map((pr) => `${pr.repo}#${pr.number}`));
             const stats = compute(prs, {
                 history: fullWindow ? snapshot.history : null,
                 baseBranch: config.baseBranch,
-                truncated: snapshot.truncated.filter((t) => inRange.has(t.number)),
+                truncated: snapshot.truncated.filter((t) => inRange.has(`${t.repo}#${t.number}`)),
                 bots,
                 now: new Date(now()),
             });
@@ -324,7 +345,7 @@ export function createStatsService({
                 ? attribute(
                       prs.map(toJoinKey),
                       filterTelemetryInput(telemetryEntry.value.input, range),
-                      { repo: config.telemetryRepo, now: new Date(now()) },
+                      { repos: config.repoNames, now: new Date(now()) },
                   )
                 : null;
 
@@ -338,7 +359,7 @@ export function createStatsService({
                     source: config.dataSource === 'fixture' ? 'fixture' : 'live',
                     rateLimit: snapshot.rateLimit,
                     revert,
-                    repo: { owner: config.repo.owner, name: config.repo.name },
+                    repos: config.repos.map((repo) => ({ owner: repo.owner, name: repo.name })),
                     baseBranch: config.baseBranch,
                     range,
                     telemetry: telemetryMeta(telemetryEntry, telemetry),

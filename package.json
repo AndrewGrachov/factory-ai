@@ -15,7 +15,7 @@
         "dev": "npm run build -w core && concurrently -n server,web -c blue,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
         "dev:server": "npm run dev -w server",
         "dev:web": "npm run dev -w web",
-        "start": "node server/dist/index.js",
+        "start": "node --env-file-if-exists=.env server/dist/index.js",
         "test": "vitest run",
         "test:db": "vitest run --config vitest.db.config.ts",
         "verify:ui": "playwright test",

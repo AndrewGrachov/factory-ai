@@ -1,5 +1,5 @@
 import type { BranchHistory, RawPullRequest, TruncatedPr } from '@factory-ai/core';
-import type { AppConfig } from '../config.js';
+import type { AppConfig, Repo } from '../config.js';
 import { GitHubError, describeHttpFailure } from './errors.js';
 import { HISTORY_QUERY, INNER_LIMIT, PAGE_SIZE, PR_QUERY, REVIEWS_QUERY, THREADS_QUERY } from './queries.js';
 import type { TokenProvider } from './token.js';
@@ -36,6 +36,8 @@ interface HistoryResponse {
 
 export interface Progress {
     phase: 'prs' | 'backfill' | 'history';
+    /** "owner/name" of the repo in flight, so a slow fetch says which one it is waiting on. */
+    repo?: string;
     prsFetched?: number;
     backfillingPr?: number;
     historyScanned?: number;
@@ -47,12 +49,21 @@ export interface PullRequestsResult {
     rateLimit: RateLimit | null;
 }
 
+/**
+ * Per repo rather than combined, because a null history is not zero and the caller has to be able
+ * to see WHICH repo went unreadable before deciding whether a combined figure is reportable.
+ */
+export interface RepoBranchHistory {
+    repo: string;
+    history: BranchHistory | null;
+}
+
 export interface GitHubClient {
     fetchPullRequests(options?: { onProgress?: (p: Progress) => void }): Promise<PullRequestsResult>;
-    fetchBranchHistory(
+    fetchBranchHistories(
         since: string,
         options?: { onProgress?: (p: Progress) => void },
-    ): Promise<BranchHistory | null>;
+    ): Promise<RepoBranchHistory[]>;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -64,11 +75,13 @@ export interface ClientDeps {
 }
 
 export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }: ClientDeps): GitHubClient {
-    const { repo, baseBranch } = config;
+    const { repos, baseBranch } = config;
+    const fullName = (repo: Repo) => `${repo.owner}/${repo.name}`;
 
     async function graphql<T>(
         query: string,
         variables: Record<string, unknown>,
+        repo: Repo,
         attempts = 3,
     ): Promise<T> {
         const token = await tokens.get();
@@ -134,6 +147,7 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
 
     async function collectNodes<N>(
         query: string,
+        repo: Repo,
         number: number,
         field: 'reviewThreads' | 'reviews',
     ): Promise<N[]> {
@@ -146,12 +160,16 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
         for (let page = 0; page < MAX_INNER_PAGES; page += 1) {
             const data = await graphql<{
                 repository: { pullRequest: Record<string, Connection<N>> };
-            }>(query, {
-                owner: repo.owner,
-                name: repo.name,
-                number,
-                cursor,
-            });
+            }>(
+                query,
+                {
+                    owner: repo.owner,
+                    name: repo.name,
+                    number,
+                    cursor,
+                },
+                repo,
+            );
             const connection = data.repository.pullRequest[field] as Connection<N>;
             nodes.push(...connection.nodes);
             if (!connection.pageInfo.hasNextPage) return nodes;
@@ -159,7 +177,7 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
         }
 
         throw new GitHubError(
-            `PR #${number} exceeded ${MAX_INNER_PAGES} inner pages; refusing to loop.`,
+            `${fullName(repo)}#${number} exceeded ${MAX_INNER_PAGES} inner pages; refusing to loop.`,
             'UPSTREAM',
         );
     }
@@ -167,6 +185,7 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
     /** Fills in the node lists the first pass cut off. Leaves `commits` alone — it only
      *  contributes commit timestamps, and 100 is already past the point of meaning. */
     async function backfill(
+        repo: Repo,
         pr: RawPullRequest,
         connections: string[],
         onProgress?: (p: Progress) => void,
@@ -174,89 +193,123 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
         const filled: string[] = [];
 
         if (connections.includes('reviewThreads')) {
-            pr.reviewThreads.nodes = await collectNodes(THREADS_QUERY, pr.number, 'reviewThreads');
+            pr.reviewThreads.nodes = await collectNodes(THREADS_QUERY, repo, pr.number, 'reviewThreads');
             filled.push('reviewThreads');
         }
         if (connections.includes('reviews')) {
-            pr.reviews.nodes = await collectNodes(REVIEWS_QUERY, pr.number, 'reviews');
+            pr.reviews.nodes = await collectNodes(REVIEWS_QUERY, repo, pr.number, 'reviews');
             filled.push('reviews');
         }
 
-        onProgress?.({ phase: 'backfill', backfillingPr: pr.number });
+        onProgress?.({ phase: 'backfill', repo: fullName(repo), backfillingPr: pr.number });
         return connections.filter((c) => !filled.includes(c));
     }
 
     return {
         async fetchPullRequests({ onProgress } = {}): Promise<PullRequestsResult> {
             const prs: RawPullRequest[] = [];
-            const oversized: { pr: RawPullRequest; connections: string[] }[] = [];
-            let cursor: string | null = null;
+            const oversized: { repo: Repo; pr: RawPullRequest; connections: string[] }[] = [];
             let rateLimit: RateLimit | null = null;
 
-            for (;;) {
-                const data: PrPageResponse = await graphql<PrPageResponse>(PR_QUERY, {
-                    owner: repo.owner,
-                    name: repo.name,
-                    pageSize: PAGE_SIZE,
-                    cursor,
-                });
+            // Sequential, not Promise.all: the point of the rate-limit budget is that it is
+            // shared, and N concurrent paginations would burn it in a burst that the TTL floor
+            // cannot smooth out.
+            for (const repo of repos) {
+                const name = fullName(repo);
+                let cursor: string | null = null;
 
-                const page: Connection<RawPullRequest> = data.repository.pullRequests;
-                rateLimit = data.rateLimit;
+                for (;;) {
+                    const data: PrPageResponse = await graphql<PrPageResponse>(
+                        PR_QUERY,
+                        {
+                            owner: repo.owner,
+                            name: repo.name,
+                            pageSize: PAGE_SIZE,
+                            cursor,
+                        },
+                        repo,
+                    );
 
-                for (const pr of page.nodes) {
-                    const cut = truncatedConnections(pr);
-                    if (cut.length) oversized.push({ pr, connections: cut });
-                    prs.push(pr);
+                    const page: Connection<RawPullRequest> = data.repository.pullRequests;
+                    rateLimit = data.rateLimit;
+
+                    for (const pr of page.nodes) {
+                        // The payload carries no repo identity, so it is stamped here — the one
+                        // place that knows which repo the response came from.
+                        pr.repo = name;
+                        const cut = truncatedConnections(pr);
+                        if (cut.length) oversized.push({ repo, pr, connections: cut });
+                        prs.push(pr);
+                    }
+
+                    onProgress?.({ phase: 'prs', repo: name, prsFetched: prs.length });
+
+                    if (!page.pageInfo.hasNextPage) break;
+                    cursor = page.pageInfo.endCursor;
                 }
-
-                onProgress?.({ phase: 'prs', prsFetched: prs.length });
-
-                if (!page.pageInfo.hasNextPage) break;
-                cursor = page.pageInfo.endCursor;
             }
 
             const truncated: TruncatedPr[] = [];
-            for (const { pr, connections } of oversized) {
-                const stillCut = await backfill(pr, connections, onProgress);
-                if (stillCut.length) truncated.push({ number: pr.number, connections: stillCut });
+            for (const { repo, pr, connections } of oversized) {
+                const stillCut = await backfill(repo, pr, connections, onProgress);
+                if (stillCut.length) {
+                    truncated.push({ repo: fullName(repo), number: pr.number, connections: stillCut });
+                }
             }
 
             return { prs, truncated, rateLimit };
         },
 
-        async fetchBranchHistory(since, { onProgress } = {}): Promise<BranchHistory | null> {
-            let cursor: string | null = null;
-            let commits = 0;
-            let reverts = 0;
+        async fetchBranchHistories(since, { onProgress } = {}): Promise<RepoBranchHistory[]> {
+            const results: RepoBranchHistory[] = [];
             let scanned = 0;
 
-            for (;;) {
-                const data: HistoryResponse = await graphql<HistoryResponse>(HISTORY_QUERY, {
-                    owner: repo.owner,
-                    name: repo.name,
-                    branch: baseBranch,
-                    since,
-                    cursor,
-                });
+            for (const repo of repos) {
+                const name = fullName(repo);
+                let cursor: string | null = null;
+                let commits = 0;
+                let reverts = 0;
+                let readable = true;
 
-                const history = data.repository.ref?.target?.history;
-                // No readable ref means no revert rate. Returning zeros here would
-                // render "0 reverts in 0 commits", which reads as a real answer.
-                if (!history) return null;
+                for (;;) {
+                    const data: HistoryResponse = await graphql<HistoryResponse>(
+                        HISTORY_QUERY,
+                        {
+                            owner: repo.owner,
+                            name: repo.name,
+                            branch: baseBranch,
+                            since,
+                            cursor,
+                        },
+                        repo,
+                    );
 
-                commits = history.totalCount;
-                for (const commit of history.nodes) {
-                    scanned += 1;
-                    if (REVERT_HEADLINE.test(commit.messageHeadline)) reverts += 1;
+                    const history = data.repository.ref?.target?.history;
+                    // No readable ref means no revert rate for this repo. Returning zeros here
+                    // would render "0 reverts in 0 commits", which reads as a real answer.
+                    if (!history) {
+                        readable = false;
+                        break;
+                    }
+
+                    commits = history.totalCount;
+                    for (const commit of history.nodes) {
+                        scanned += 1;
+                        if (REVERT_HEADLINE.test(commit.messageHeadline)) reverts += 1;
+                    }
+                    onProgress?.({ phase: 'history', repo: name, historyScanned: scanned });
+
+                    if (!history.pageInfo.hasNextPage) break;
+                    cursor = history.pageInfo.endCursor;
                 }
-                onProgress?.({ phase: 'history', historyScanned: scanned });
 
-                if (!history.pageInfo.hasNextPage) break;
-                cursor = history.pageInfo.endCursor;
+                results.push({
+                    repo: name,
+                    history: readable ? { branch: baseBranch, since, commits, reverts } : null,
+                });
             }
 
-            return { branch: baseBranch, since, commits, reverts };
+            return results;
         },
     };
 }

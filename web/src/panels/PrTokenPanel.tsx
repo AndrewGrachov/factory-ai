@@ -2,14 +2,14 @@ import type { PrTelemetryRow, TelemetryStats } from '@factory-ai/core';
 import type { TelemetryMeta } from '../api/useStats.js';
 import { DataTable } from '../components/DataTable.js';
 import type { Column } from '../components/DataTable.js';
-import { duration, num, pct, tokens } from '../format.js';
+import { duration, num, pct, prLabel, tokens } from '../format.js';
 import { TelemetryFrame } from './TelemetryFrame.js';
 
 const attribution = (row: PrTelemetryRow) =>
     row.attribution === 'shared' ? 'shared — not divisible' : row.attribution === 'none' ? '—' : 'exact';
 
-const columns: Column<PrTelemetryRow>[] = [
-    { key: 'number', label: 'PR', format: (r) => `#${r.number}` },
+const buildColumns = (repoCount: number): Column<PrTelemetryRow>[] => [
+    { key: 'number', label: 'PR', format: (r) => prLabel(r.repo, r.number, repoCount) },
     { key: 'branch', label: 'branch' },
     { key: 'author', label: 'author' },
     { key: 'sessions', label: 'sessions', format: (r) => (r.sessions ? String(r.sessions) : '—') },
@@ -31,9 +31,11 @@ const columns: Column<PrTelemetryRow>[] = [
 export function PrTokenPanel({
     telemetry,
     meta,
+    repoCount,
 }: {
     telemetry: TelemetryStats;
     meta: TelemetryMeta;
+    repoCount: number;
 }) {
     // PRs with no matching session are deliberately excluded from the table but counted in
     // the caption: listing 194 all-dash rows would bury the nine that have data, while
@@ -63,7 +65,7 @@ export function PrTokenPanel({
                         : 'Work on a branch with an open PR and it will appear here.'}
                 </p>
             ) : (
-                <DataTable columns={columns} rows={rows} sortable />
+                <DataTable columns={buildColumns(repoCount)} rows={rows} sortable />
             )}
         </TelemetryFrame>
     );

@@ -12,7 +12,7 @@ import { FIXTURE_NOW, FIXTURE_REPO, joinKeys, samplePayload, sampleTelemetry } f
  */
 
 const telemetry = sampleTelemetry();
-const stats = attribute(joinKeys(), telemetry, { repo: FIXTURE_REPO, now: FIXTURE_NOW });
+const stats = attribute(joinKeys(), telemetry, { repos: [FIXTURE_REPO], now: FIXTURE_NOW });
 
 // ---- hand-rolled reimplementation -------------------------------------------------------
 

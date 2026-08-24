@@ -34,7 +34,7 @@ export function AiUsagePanel({
             <Card
                 value={num(t.sessions, 0)}
                 label="agent sessions"
-                note={meta.source === 'fixture' ? 'synthetic fixture data' : meta.repoFilter}
+                note={meta.source === 'fixture' ? 'synthetic fixture data' : meta.repoFilter.join(', ')}
             />
             <Card
                 value={duration(t.activeHours)}

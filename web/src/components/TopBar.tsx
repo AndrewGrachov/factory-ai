@@ -1,4 +1,5 @@
 import type { StatsPayload } from '../api/useStats.js';
+import { OrgSelector } from './OrgSelector.js';
 
 /**
  * Names every repo rather than reporting a count. "3 repositories combined" hides which three,
@@ -33,6 +34,22 @@ export function TopBar({
                 </p>
             </div>
             <div className="topbar-actions">
+                {/*
+                 * Leftmost of the group, because it is *scope*: beside the "data as of" caption it
+                 * reads as "what you are looking at" against the button's "do something". Refresh
+                 * stays in the far corner — it is the only action, and moving it costs muscle
+                 * memory for nothing.
+                 *
+                 * Nothing renders before the first payload. A placeholder select with no options
+                 * would flash an empty control, and the subtitle already says "loading…".
+                 *
+                 * The organization name does NOT replace describeRepos() above. That comment says
+                 * the repo list is named rather than counted because the figures are only
+                 * interpretable if you know what went into them — an organization name does not
+                 * tell you that, and repos living under [organization] in the config file does not
+                 * make its name a summary of the list.
+                 */}
+                {meta ? <OrgSelector organization={meta.organization} /> : null}
                 <span className="muted">
                     {meta
                         ? `data as of ${new Date(meta.fetchedAt).toLocaleString()}${

@@ -122,7 +122,11 @@ button:disabled {
     color: var(--muted);
 }
 
-.range-custom input {
+/* Grouped so `color-scheme: dark` lives in exactly one place. It is the easy line to forget, and
+   without it a native control's popup and its disabled text render dark grey on white in a dark
+   page. */
+.range-custom input,
+.org-select {
     background: #21262d;
     color: var(--text);
     border: 1px solid var(--border);
@@ -130,6 +134,25 @@ button:disabled {
     padding: 5px 8px;
     font: inherit;
     color-scheme: dark;
+}
+
+.org-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* The topbar wraps at narrow widths, and a long organization name must not push Refresh onto a
+   second line before the charts have become illegible anyway (~700px). */
+.org-select {
+    max-width: 220px;
+}
+
+/* Inert, not broken: the field keeps its shape and drops to muted text, exactly as
+   `button:disabled` does, so the page has one vocabulary for "not available here". */
+.org-select:disabled {
+    color: var(--muted);
+    cursor: default;
 }
 
 main {

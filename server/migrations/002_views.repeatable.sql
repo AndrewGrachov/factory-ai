@@ -22,6 +22,9 @@ drop view if exists session_source;
 --
 -- Per session, not global — a run of transcript-only sessions is not displaced by one OTEL
 -- session existing somewhere else.
+--
+-- No org_id, on purpose: this reads metric_point, which has none. A datapoint's organization is
+-- resolved through session_branch, exactly as its repo is. See the header of 005_organizations.sql.
 create or replace view session_source as
 select
     agent,
@@ -32,6 +35,9 @@ group by agent, session_id;
 
 -- Every view below reads THIS, never metric_point directly. Reading the table would
 -- reintroduce the double count that session_source exists to prevent.
+--
+-- Carries no org_id either, for the same reason as session_source above. The views that need one
+-- pick it up from session_branch when they join.
 create or replace view metric_point_used as
 select mp.*
 from metric_point mp
@@ -45,8 +51,13 @@ join session_source ss
 -- The upsert widens first_seen/last_seen, so consecutive branches can overlap and a raw join
 -- would count the same datapoint twice. Clamping each slice to the next one's start makes the
 -- attribution a genuine partition.
+--
+-- org_id is in the window partition, not merely projected. Without it the clamp would run across
+-- organizations: one org's slice would be truncated by the start of another's, silently dropping
+-- datapoints from the interval that used to contain them.
 create or replace view session_branch_slice as
 select
+    org_id,
     agent,
     session_id,
     repo,
@@ -57,7 +68,7 @@ select
     least(
         last_seen,
         coalesce(
-            lead(first_seen) over (partition by agent, session_id order by first_seen)
+            lead(first_seen) over (partition by org_id, agent, session_id order by first_seen)
                 - interval '1 microsecond',
             last_seen
         )
@@ -99,8 +110,11 @@ group by agent, session_id, field;
 
 -- Per (session, branch, field), by time containment. Restricted to non-cumulative points:
 -- a cumulative total has no position in time, so it cannot be divided across branches.
+--
+-- The org comes from the slice, which is the only side of this join that knows one.
 create or replace view branch_field_total as
 select
+    slice.org_id,
     mp.agent,
     mp.session_id,
     slice.branch,
@@ -114,7 +128,7 @@ join session_branch_slice slice
    and mp.time <= slice.last_seen
 where mp.field is not null
   and mp.temporality <> 'cumulative'
-group by mp.agent, mp.session_id, slice.branch, mp.field;
+group by slice.org_id, mp.agent, mp.session_id, slice.branch, mp.field;
 
 -- One row per session: its window, its repo, and whether it can be divided at all.
 create or replace view session_summary as
@@ -129,13 +143,14 @@ branches as (
     -- ::int matters. postgres.js returns bigint as a string, so a bare count(*) makes
     -- `branch_count === 1` false in the client, and a single-branch session silently falls
     -- through to the multi-branch path with a share of 0.
-    select agent, session_id, min(repo) as repo, count(*)::int as branch_count
+    select agent, session_id, min(org_id) as org_id, min(repo) as repo, count(*)::int as branch_count
     from session_branch
     group by agent, session_id
 )
 select
     o.agent,
     o.session_id,
+    b.org_id,                                   -- null when the hook never reported, exactly as repo is
     b.repo,                                     -- null when the hook never reported
     coalesce(b.branch_count, 0) as branch_count,
     o.first_seen,

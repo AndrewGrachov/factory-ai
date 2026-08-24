@@ -51,7 +51,7 @@ export async function buildApp({
     });
 
     await app.register(healthRoutes(config));
-    await app.register(statsRoutes(service, now));
+    await app.register(statsRoutes(config, service, now));
     if (store) await app.register(ingestRoutes(store));
 
     if (config.webRoot) {

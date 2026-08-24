@@ -26,15 +26,20 @@ if (url) assertTestDatabase(url);
 
 let sql: Sql;
 let store: PrStore;
+/** A second store on the same pool, bound to a different org. Only the org guard uses it. */
+let otherOrgStore: PrStore;
 
 const REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
 const OTHER = 'Leeloo-AI-RGA-OS/leeloo-infra';
+const ORG = 'test-org';
+const OTHER_ORG = 'other-org';
 
 beforeAll(async () => {
     if (!enabled) return;
     sql = postgres(url as string, { max: 2 });
-    await migrate(sql, { attempts: 3 });
-    store = createPrStore({ sql });
+    await migrate(sql, { orgId: ORG, attempts: 3 });
+    store = createPrStore({ sql, orgId: ORG });
+    otherOrgStore = createPrStore({ sql, orgId: OTHER_ORG });
 });
 
 afterAll(async () => {
@@ -162,6 +167,52 @@ describe.skipIf(!enabled)('the pull request store', () => {
         expect(both).toHaveLength(2);
         expect(both.find((p) => p.repo === OTHER)?.title).toBe('other');
         expect(await store.loadPullRequests('github', [REPO])).toHaveLength(1);
+    });
+
+    it('keeps the same PR number under two organizations apart', async () => {
+        // The guard that fails loudly if a future refactor drops org_id from a key. A repo path and
+        // a PR number are BOTH routinely identical across organizations — two tenants each with
+        // their own fork of the same repo, each with a #1 — so keyed without org one tenant's
+        // figures land on the other's PR and nothing anywhere reports an error.
+        await store.savePullRequests([pr({ title: 'ours' })]);
+        await otherOrgStore.savePullRequests([pr({ title: 'theirs', reviews: [], reviewCount: 0 })]);
+
+        const ours = await store.loadPullRequests('github', [REPO]);
+        const theirs = await otherOrgStore.loadPullRequests('github', [REPO]);
+        expect(ours).toHaveLength(1);
+        expect(theirs).toHaveLength(1);
+        expect(ours[0]?.title).toBe('ours');
+        expect(theirs[0]?.title).toBe('theirs');
+        // Two rows in the table, not one overwriting the other.
+        expect(await count('pull_request')).toBe(2);
+    });
+
+    it("a complete child list does not delete another organization's rows", async () => {
+        // writeChildren deletes before inserting whenever the incoming list is complete. Unscoped,
+        // that delete reaches across the whole table — so one tenant's ordinary refetch silently
+        // empties another tenant's reviews for the same repo and number.
+        await store.savePullRequests([pr()]);
+        const before = await count('pr_review');
+        expect(before).toBeGreaterThan(0);
+
+        await otherOrgStore.savePullRequests([pr({ reviews: [], reviewCount: 0 })]);
+
+        expect((await store.loadPullRequests('github', [REPO]))[0]?.reviews).toHaveLength(before);
+    });
+
+    it('keeps sync watermarks apart across organizations', async () => {
+        // A shared watermark would let one tenant's completed walk convince the other's next run
+        // that it had already caught up — skipping everything in between, silently and permanently.
+        await store.recordSync('github', REPO, 'pull_requests', {
+            watermarkAt: '2026-08-20T00:00:00.000Z',
+            mode: 'full',
+            rateLimit: null,
+            syncedEpoch: SCHEMA_EPOCH,
+        });
+
+        expect(await otherOrgStore.readSyncState('github', [REPO], 'pull_requests')).toEqual({});
+        const mine = await store.readSyncState('github', [REPO], 'pull_requests');
+        expect(mine[REPO]?.watermarkAt).toBe('2026-08-20T00:00:00.000Z');
     });
 
     it('deletes a review that vanished upstream, when the list was complete', async () => {

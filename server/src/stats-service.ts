@@ -13,6 +13,7 @@ import type {
     CanonicalPr,
     DateRange,
     DerivedPr,
+    OrganizationMeta,
     PrTelemetryKey,
     Stats,
     TelemetryInput,
@@ -122,6 +123,16 @@ export interface StatsPayload {
         source: 'live' | 'fixture';
         rateLimit: RateLimit | null;
         revert: RevertStatus;
+        /**
+         * Whose figures these are, and what else the caller could ask for.
+         *
+         * One block rather than a bare `org: string`, and in this payload rather than behind a
+         * second `GET /api/orgs`: `current` has to ride here regardless — the store is partitioned
+         * by organization, so a page that cannot name the one it is showing cannot be read — and
+         * bundling `available` with it makes the pair atomic. Split across two requests,
+         * `/api/orgs` can say "you may see A and B" while these figures were computed for A.
+         */
+        organization: OrganizationMeta;
         /** Every repo in the combined view. Per-repo pages will filter this, not refetch. */
         repos: { owner: string; name: string }[];
         baseBranch: string;
@@ -229,6 +240,10 @@ export function createStatsService({
 }: StatsServiceDeps): StatsService {
     const bots = new Set(config.bots);
     const repoNames = config.repoNames;
+    // Frozen once: with no accounts there is nothing that could change it mid-process, and one
+    // object shared by `current` and `available` makes their equality structural rather than
+    // coincidental.
+    const organization = Object.freeze({ id: config.orgId, name: config.orgName });
     const PR_KIND = 'pull_requests';
     const HISTORY_KIND = `history:${config.baseBranch}`;
 
@@ -800,6 +815,14 @@ export function createStatsService({
                     source: config.dataSource === 'fixture' ? 'fixture' : 'live',
                     rateLimit: snapshot.rateLimit,
                     revert,
+                    organization: {
+                        // A literal, not a config field. A switch that could say 'directory' with
+                        // no directory behind it is the inexpressible-bad-combination rule again —
+                        // the same reason `persistence` is derived rather than configured.
+                        mode: 'config',
+                        current: organization,
+                        available: [organization],
+                    },
                     repos: config.repos.map((repo) => ({ owner: repo.owner, name: repo.name })),
                     baseBranch: config.baseBranch,
                     range,

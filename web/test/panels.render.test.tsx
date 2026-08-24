@@ -112,6 +112,10 @@ describe('telemetry panels render', () => {
                 meta={{
                     fetchedAt: NOW.toISOString(), ageSeconds: 0, stale: false, source: 'fixture',
                     rateLimit: null, revert: { status: 'unavailable', reason: 'no token' },
+                    organization: {
+                        mode: 'config', current: { id: 'x-org', name: 'X Org' },
+                        available: [{ id: 'x-org', name: 'X Org' }],
+                    },
                     repos: [{ owner: 'x', name: 'y' }], baseBranch: 'dev',
                     range: { preset: 'all', from: null, to: null }, telemetry: meta(),
                 }}

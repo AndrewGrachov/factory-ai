@@ -29,10 +29,13 @@ if (url) assertTestDatabase(url);
 
 let sql: Sql;
 
+const ORG = 'test-org';
+const OTHER_ORG = 'other-org';
+
 beforeAll(async () => {
     if (!enabled) return;
     sql = postgres(url as string, { max: 2 });
-    await migrate(sql, { attempts: 3 });
+    await migrate(sql, { orgId: ORG, attempts: 3 });
 });
 
 afterAll(async () => {
@@ -76,8 +79,10 @@ async function branch(row: {
     from: string;
     to: string;
     repo?: string;
+    org?: string;
 }) {
     await sql`insert into session_branch ${sql({
+        org_id: row.org ?? ORG,
         agent: 'claude-code',
         session_id: row.session,
         repo: row.repo ?? 'acme/app',
@@ -98,8 +103,8 @@ describe.skipIf(!enabled)('migrations', () => {
     });
 
     it('is idempotent, recording each versioned file once', async () => {
-        await migrate(sql, { attempts: 1 });
-        await migrate(sql, { attempts: 1 });
+        await migrate(sql, { orgId: ORG, attempts: 1 });
+        await migrate(sql, { orgId: ORG, attempts: 1 });
         const rows = await sql<{ version: string; n: number }[]>`
             select version, count(*)::int as n from schema_migrations group by version
         `;
@@ -112,7 +117,7 @@ describe.skipIf(!enabled)('migrations', () => {
 
     it('re-applies a repeatable file on every run', async () => {
         await sql`drop view if exists session_summary`;
-        await migrate(sql, { attempts: 1 });
+        await migrate(sql, { orgId: ORG, attempts: 1 });
         const [row] = await sql<{ n: number }[]>`
             select count(*)::int as n from pg_views where viewname = 'session_summary'
         `;
@@ -218,9 +223,9 @@ describe.skipIf(!enabled)('branch slicing', () => {
     it('widens rather than overwrites on a repeated upsert', async () => {
         await branch({ session: 's1', branch: 'feat/a', from: '2026-08-01T10:00:00Z', to: '2026-08-01T10:10:00Z' });
         await sql`
-            insert into session_branch (agent, session_id, repo, branch, first_seen, last_seen, samples)
-            values ('claude-code', 's1', 'acme/app', 'feat/a', ${T('2026-08-01T10:20:00Z')}, ${T('2026-08-01T10:30:00Z')}, 1)
-            on conflict (agent, session_id, repo, branch) do update
+            insert into session_branch (org_id, agent, session_id, repo, branch, first_seen, last_seen, samples)
+            values (${ORG}, 'claude-code', 's1', 'acme/app', 'feat/a', ${T('2026-08-01T10:20:00Z')}, ${T('2026-08-01T10:30:00Z')}, 1)
+            on conflict (org_id, agent, session_id, repo, branch) do update
                 set first_seen = least(session_branch.first_seen, excluded.first_seen),
                     last_seen  = greatest(session_branch.last_seen, excluded.last_seen),
                     samples    = session_branch.samples + 1
@@ -236,7 +241,7 @@ describe.skipIf(!enabled)('branch slicing', () => {
 
 describe.skipIf(!enabled)('the postgres client', () => {
     it('reports an empty store as empty, not unreachable', async () => {
-        const client = createPostgresTelemetryClient({ sql });
+        const client = createPostgresTelemetryClient({ sql, orgId: ORG });
         expect((await client.health()).status).toBe('empty');
         const input = await client.fetchRollups();
         expect(input.sessions).toEqual([]);
@@ -251,7 +256,7 @@ describe.skipIf(!enabled)('the postgres client', () => {
             temporality: 'cumulative', startTime: '2026-08-01T10:00:00Z',
         });
 
-        const client = createPostgresTelemetryClient({ sql });
+        const client = createPostgresTelemetryClient({ sql, orgId: ORG });
         const input = await client.fetchRollups();
         expect(input.sessions[0]?.granularity).toBe('session');
         expect(input.splits).toHaveLength(2);
@@ -270,22 +275,57 @@ describe.skipIf(!enabled)('the postgres client', () => {
             temporality: 'cumulative', startTime: '2026-08-01T10:00:00Z',
         });
 
-        const input = await createPostgresTelemetryClient({ sql }).fetchRollups();
+        const input = await createPostgresTelemetryClient({ sql, orgId: ORG }).fetchRollups();
         expect(input.splits[0]?.share).toBe(1);
         expect(input.splits[0]?.tokens.input).toBe(100);
     });
 
     it('reports a session with no hook data as repo null', async () => {
         await point({ session: 's1', field: 'tokens_input', value: 10, time: '2026-08-01T10:00:00Z' });
-        const input = await createPostgresTelemetryClient({ sql }).fetchRollups();
+        const input = await createPostgresTelemetryClient({ sql, orgId: ORG }).fetchRollups();
         expect(input.sessions[0]?.repo).toBeNull();
         expect(input.splits).toEqual([]);
+    });
+
+    it("does not attribute one organization's session to another's branch", async () => {
+        // Same repo path, same branch name, same session window — routine across tenants. Keyed
+        // without org_id, the slice from one organization would claim the other's datapoints, and
+        // the number rendered would be plausible and wrong.
+        await branch({
+            session: 's1', branch: 'feat/a',
+            from: '2026-08-01T10:00:00Z', to: '2026-08-01T11:00:00Z',
+        });
+        await branch({
+            session: 's1', branch: 'feat/a', org: OTHER_ORG,
+            from: '2026-08-01T10:00:00Z', to: '2026-08-01T11:00:00Z',
+        });
+        await point({ session: 's1', field: 'tokens_input', value: 100, time: '2026-08-01T10:30:00Z' });
+
+        // One slice each, not two apiece: session_branch_slice partitions its window by org, so
+        // neither organization's clamp truncates the other's.
+        const mine = await createPostgresTelemetryClient({ sql, orgId: ORG }).fetchRollups();
+        const theirs = await createPostgresTelemetryClient({ sql, orgId: OTHER_ORG }).fetchRollups();
+        expect(mine.spans).toHaveLength(1);
+        expect(theirs.spans).toHaveLength(1);
+        expect(mine.splits.map((s) => s.tokens.input)).toEqual([100]);
+        expect(theirs.splits.map((s) => s.tokens.input)).toEqual([100]);
+    });
+
+    it('still reports a hook-less session, which belongs to no organization', async () => {
+        // session_summary reads its org from session_branch, so a session the hook never covered
+        // has none. Those rows feed sessionsWithoutHook — the number that says the plugin is
+        // missing or broken — so filtering them by org would make a broken hook look like an idle
+        // week.
+        await point({ session: 'orphan', field: 'tokens_input', value: 10, time: '2026-08-01T10:00:00Z' });
+        const input = await createPostgresTelemetryClient({ sql, orgId: ORG }).fetchRollups();
+        expect(input.sessions.map((s) => s.sessionId)).toEqual(['orphan']);
+        expect(input.sessions[0]?.repo).toBeNull();
     });
 
     it('leaves unmeasured fields null rather than zero', async () => {
         await branch({ session: 's1', branch: 'feat/a', from: '2026-08-01T10:00:00Z', to: '2026-08-01T11:00:00Z' });
         await point({ session: 's1', field: 'tokens_input', value: 10, time: '2026-08-01T10:00:00Z' });
-        const input = await createPostgresTelemetryClient({ sql }).fetchRollups();
+        const input = await createPostgresTelemetryClient({ sql, orgId: ORG }).fetchRollups();
         const session = input.sessions[0];
         expect(session?.tokens.input).toBe(10);
         expect(session?.tokens.output).toBeNull();

@@ -127,7 +127,23 @@ interface PrRow {
     provider_updated_at: Date;
 }
 
-export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknown> }): PrStore {
+/**
+ * The organization is bound at construction, not passed per call.
+ *
+ * It is a constant for the life of the process, so threading it through all thirteen call sites in
+ * stats-service would be the same literal thirteen times — and one of them eventually forgotten.
+ * Binding it also happens to be the shape a per-request store needs later, where the org is no
+ * longer a constant; a leading parameter would have to be plumbed through anyway.
+ */
+export function createPrStore({
+    sql,
+    orgId,
+    ready,
+}: {
+    sql: Sql;
+    orgId: string;
+    ready?: Promise<unknown>;
+}): PrStore {
     const gate = async () => {
         if (ready) await ready;
     };
@@ -139,7 +155,8 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
 
             const rows = await sql<PrRow[]>`
                 select * from pull_request
-                where provider = ${provider} and repo in ${sql(repos as string[])}
+                where org_id = ${orgId} and provider = ${provider}
+                  and repo in ${sql(repos as string[])}
                 order by created_at desc, repo asc, number desc
             `;
             if (!rows.length) return [];
@@ -156,7 +173,7 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                         provider_state: string;
                         submitted_at: Date | null;
                     }[]
-                >`select * from pr_review where provider = ${provider} and repo in ${sql(repos as string[])}`,
+                >`select * from pr_review where org_id = ${orgId} and provider = ${provider} and repo in ${sql(repos as string[])}`,
                 sql<
                     {
                         repo: string;
@@ -168,13 +185,15 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                         first_comment_at: Date | null;
                         parent_review_key: string | null;
                     }[]
-                >`select * from pr_review_thread where provider = ${provider} and repo in ${sql(repos as string[])}`,
+                >`select * from pr_review_thread where org_id = ${orgId} and provider = ${provider} and repo in ${sql(repos as string[])}`,
                 sql<{ repo: string; pr_number: number; sha: string; committed_at: Date }[]>`
-                    select * from pr_commit where provider = ${provider} and repo in ${sql(repos as string[])}
+                    select * from pr_commit
+                    where org_id = ${orgId} and provider = ${provider} and repo in ${sql(repos as string[])}
                     order by committed_at asc
                 `,
                 sql<{ repo: string; pr_number: number; label: string }[]>`
-                    select * from pr_label where provider = ${provider} and repo in ${sql(repos as string[])}
+                    select * from pr_label
+                    where org_id = ${orgId} and provider = ${provider} and repo in ${sql(repos as string[])}
                     order by label asc
                 `,
             ]);
@@ -251,12 +270,13 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                 await sql.begin(async (tx) => {
                     await tx`
                         insert into pull_request (
-                            provider, repo, number, title, state, is_draft, base_ref, head_ref,
-                            author, created_at, merged_at, closed_at, ready_at, additions,
+                            org_id, provider, repo, number, title, state, is_draft, base_ref,
+                            head_ref, author, created_at, merged_at, closed_at, ready_at, additions,
                             deletions, changed_files, commit_count, review_count, thread_count,
                             issue_comment_count, force_push_count, truncated, provider_updated_at,
                             fetched_at
                         ) values (
+                            ${orgId},
                             ${pr.provider}, ${pr.repo}, ${pr.number}, ${pr.title}, ${pr.state},
                             ${pr.isDraft}, ${pr.baseRef}, ${pr.headRef}, ${pr.author?.login ?? null},
                             ${pr.createdAt}, ${pr.mergedAt}, ${pr.closedAt}, ${pr.readyAt},
@@ -264,7 +284,7 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                             ${pr.reviewCount}, ${pr.threadCount}, ${pr.issueCommentCount},
                             ${pr.forcePushCount}, ${pr.truncated}, ${pr.updatedAt}, now()
                         )
-                        on conflict (provider, repo, number) do update set
+                        on conflict (org_id, provider, repo, number) do update set
                             title               = excluded.title,
                             state               = excluded.state,
                             is_draft            = excluded.is_draft,
@@ -290,7 +310,7 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                             fetched_at          = now()
                     `;
 
-                    await writeChildren(tx, pr);
+                    await writeChildren(tx, orgId, pr);
                 });
             }
         },
@@ -302,7 +322,8 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                 { repo: string; branch: string; sha: string; committed_at: Date; message_headline: string }[]
             >`
                 select * from branch_commit
-                where provider = ${provider} and branch = ${branch} and repo in ${sql(repos as string[])}
+                where org_id = ${orgId} and provider = ${provider} and branch = ${branch}
+                  and repo in ${sql(repos as string[])}
                 order by committed_at asc
             `;
             return rows.map((row) => ({
@@ -319,6 +340,7 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
 
             if (newCommits.length) {
                 const payload = newCommits.map((commit) => ({
+                    org_id: orgId,
                     provider,
                     repo,
                     branch,
@@ -333,9 +355,9 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
             }
 
             await sql`
-                insert into branch_history (provider, repo, branch, covered_from, commits, reverts, scanned_at)
-                values (${provider}, ${repo}, ${branch}, ${coveredFrom}, ${commits}, ${reverts}, now())
-                on conflict (provider, repo, branch) do update set
+                insert into branch_history (org_id, provider, repo, branch, covered_from, commits, reverts, scanned_at)
+                values (${orgId}, ${provider}, ${repo}, ${branch}, ${coveredFrom}, ${commits}, ${reverts}, now())
+                on conflict (org_id, provider, repo, branch) do update set
                     -- Coverage only ever grows backwards. A later scan starting from a newer
                     -- lower bound has not lost the older commits, and moving this forward would
                     -- make a range that IS covered report as unavailable.
@@ -360,7 +382,8 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                 }[]
             >`
                 select * from branch_history
-                where provider = ${provider} and branch = ${branch} and repo in ${sql(repos as string[])}
+                where org_id = ${orgId} and provider = ${provider} and branch = ${branch}
+                  and repo in ${sql(repos as string[])}
             `;
             return rows.map((row) => ({
                 repo: row.repo,
@@ -386,7 +409,8 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
                 }[]
             >`
                 select * from sync_state
-                where provider = ${provider} and kind = ${kind} and repo in ${sql(repos as string[])}
+                where org_id = ${orgId} and provider = ${provider} and kind = ${kind}
+                  and repo in ${sql(repos as string[])}
             `;
 
             const state: Record<string, SyncState> = {};
@@ -407,7 +431,8 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
             if (!repos.length) return {};
             const rows = await sql<{ repo: string; oldest: Date }[]>`
                 select repo, min(provider_updated_at) as oldest from pull_request
-                where provider = ${provider} and state = 'open' and repo in ${sql(repos as string[])}
+                where org_id = ${orgId} and provider = ${provider} and state = 'open'
+                  and repo in ${sql(repos as string[])}
                 group by repo
             `;
             return Object.fromEntries(rows.map((row) => [row.repo, row.oldest.toISOString()]));
@@ -418,13 +443,13 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
             const full = mode === 'full';
             await sql`
                 insert into sync_state (
-                    provider, repo, kind, watermark_at, last_sync_at, last_full_at,
+                    org_id, provider, repo, kind, watermark_at, last_sync_at, last_full_at,
                     synced_epoch, last_rate_limit
                 ) values (
-                    ${provider}, ${repo}, ${kind}, ${watermarkAt}, now(),
+                    ${orgId}, ${provider}, ${repo}, ${kind}, ${watermarkAt}, now(),
                     ${full ? sql`now()` : null}, ${syncedEpoch}, ${rateLimit as never}
                 )
-                on conflict (provider, repo, kind) do update set
+                on conflict (org_id, provider, repo, kind) do update set
                     -- Monotonic. A page loop that stopped early hands back the watermark it
                     -- started from, and an out-of-order report must not rewind coverage.
                     watermark_at    = greatest(sync_state.watermark_at, excluded.watermark_at),
@@ -453,13 +478,16 @@ export function createPrStore({ sql, ready }: { sql: Sql; ready?: Promise<unknow
  * The decision is per connection because one PR can arrive with a complete commit list and a
  * truncated review list in the same fetch.
  */
-async function writeChildren(tx: TransactionSql, pr: CanonicalPr): Promise<void> {
-    const key = { provider: pr.provider, repo: pr.repo, pr_number: pr.number };
+async function writeChildren(tx: TransactionSql, orgId: string, pr: CanonicalPr): Promise<void> {
+    const key = { org_id: orgId, provider: pr.provider, repo: pr.repo, pr_number: pr.number };
     const complete = (connection: PrConnection) => !pr.truncated.includes(connection);
+    // Every delete below is org-scoped. Without it a complete list for one org would wipe another
+    // org's rows for the same repo and PR number — and both are routinely the same string.
+    const owned = tx`org_id = ${orgId} and provider = ${pr.provider}
+                     and repo = ${pr.repo} and pr_number = ${pr.number}`;
 
     if (complete('reviews')) {
-        await tx`delete from pr_review
-                 where provider = ${pr.provider} and repo = ${pr.repo} and pr_number = ${pr.number}`;
+        await tx`delete from pr_review where ${owned}`;
     }
     if (pr.reviews.length) {
         await tx`
@@ -473,7 +501,7 @@ async function writeChildren(tx: TransactionSql, pr: CanonicalPr): Promise<void>
                     submitted_at: review.submittedAt === null ? null : new Date(review.submittedAt),
                 })),
             )}
-            on conflict (provider, repo, pr_number, review_key) do update set
+            on conflict (org_id, provider, repo, pr_number, review_key) do update set
                 author         = excluded.author,
                 state          = excluded.state,
                 provider_state = excluded.provider_state,
@@ -482,8 +510,7 @@ async function writeChildren(tx: TransactionSql, pr: CanonicalPr): Promise<void>
     }
 
     if (complete('reviewThreads')) {
-        await tx`delete from pr_review_thread
-                 where provider = ${pr.provider} and repo = ${pr.repo} and pr_number = ${pr.number}`;
+        await tx`delete from pr_review_thread where ${owned}`;
     }
     if (pr.threads.length) {
         await tx`
@@ -499,7 +526,7 @@ async function writeChildren(tx: TransactionSql, pr: CanonicalPr): Promise<void>
                     parent_review_key: thread.parentReviewKey,
                 })),
             )}
-            on conflict (provider, repo, pr_number, thread_key) do update set
+            on conflict (org_id, provider, repo, pr_number, thread_key) do update set
                 is_resolved          = excluded.is_resolved,
                 is_outdated          = excluded.is_outdated,
                 first_comment_author = excluded.first_comment_author,
@@ -509,8 +536,7 @@ async function writeChildren(tx: TransactionSql, pr: CanonicalPr): Promise<void>
     }
 
     if (complete('commits')) {
-        await tx`delete from pr_commit
-                 where provider = ${pr.provider} and repo = ${pr.repo} and pr_number = ${pr.number}`;
+        await tx`delete from pr_commit where ${owned}`;
     }
     if (pr.commits.length) {
         await tx`
@@ -527,8 +553,7 @@ async function writeChildren(tx: TransactionSql, pr: CanonicalPr): Promise<void>
 
     // Labels have no count of their own, so they are always complete: the query asks for 20 and
     // nothing reports how many there really are. Replace outright — a removed label must go.
-    await tx`delete from pr_label
-             where provider = ${pr.provider} and repo = ${pr.repo} and pr_number = ${pr.number}`;
+    await tx`delete from pr_label where ${owned}`;
     if (pr.labels.length) {
         await tx`insert into pr_label ${tx(pr.labels.map((label) => ({ ...key, label })))}
                  on conflict do nothing`;

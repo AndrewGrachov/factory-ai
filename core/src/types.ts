@@ -1,5 +1,37 @@
 import type { CanonicalPrState, PrConnection } from './canonical.js';
 
+/**
+ * The entity that owns a set of repos and partitions all stored history.
+ *
+ * `id` and `name` are separate fields because they are different kinds of thing: the id is a KEY —
+ * it leads every org-owned primary key and travels back to the server as `?org=` — and the name is
+ * only ever a label. Collapsing them is the `{ totalCount, nodes }` mistake in miniature: one
+ * field standing in for two values a call site must never confuse.
+ */
+export interface Organization {
+    readonly id: string;
+    readonly name: string;
+}
+
+export interface OrganizationMeta {
+    /**
+     * 'config'    — one org, defined in factory.toml. `available` is exactly `[current]`.
+     * 'directory' — orgs come from a user directory; `available` is this caller's memberships.
+     *
+     * A discriminant rather than an inference from `available.length > 1`, because those are
+     * different facts. A directory user who belongs to one org today can be given a second
+     * tomorrow with no deploy; a control disabled by list length would be inert for the wrong
+     * reason and correct only by accident.
+     */
+    readonly mode: 'config' | 'directory';
+    readonly current: Organization;
+    /**
+     * Never empty, and always contains `current`. Length 1 is the common case, not a special case —
+     * which is what lets the selector be one component with no mode-specific branch.
+     */
+    readonly available: readonly Organization[];
+}
+
 export interface ThreadRecord {
     author: string;
     reviewId: string | null;

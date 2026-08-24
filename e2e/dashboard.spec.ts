@@ -164,3 +164,21 @@ test.describe('date range selector', () => {
         expect(problems.join('\n')).toBe('');
     });
 });
+
+test.describe('the organization selector', () => {
+    // Its own case because assertRendersCleanly only scans `main`, and the topbar is outside it.
+    test('names the organization and is inert', async ({ page }) => {
+        await open(page);
+
+        const select = page.locator('.org-select');
+        await expect(select).toBeDisabled();
+        await expect(select).toHaveValue('e2e-org');
+        await expect(select).toHaveText('E2E Org');
+        // One option, because a config-mode deployment has exactly one organization.
+        await expect(select.locator('option')).toHaveCount(1);
+
+        // Fitting beside Refresh without wrapping is a layout fact no assertion covers.
+        await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible();
+        await page.locator('.topbar').screenshot({ path: `${SHOTS}/topbar-org.png` });
+    });
+});

@@ -10,8 +10,16 @@ services:
             DATA_SOURCE: ${DATA_SOURCE:-fixture}
             GITHUB_TOKEN: ${GITHUB_TOKEN:-}
             GITHUB_OWNER: ${GITHUB_OWNER:-Leeloo-AI-RGA-OS}
-            # Comma-separated; every repo listed is reported combined.
-            GITHUB_REPOS: ${GITHUB_REPOS:-leeloo.ai}
+            # Empty-defaulted, unlike most of this block, so a mounted factory.toml's
+            # [organization] still wins: an empty variable is not an override. A literal default
+            # here would clobber the file's organization.id on every start, and that id leads every
+            # stored primary key — the dashboard would come back empty and read as data loss.
+            # ORG_REPOS gets the same treatment for the same reason, one step less severe.
+            ORG_ID: ${ORG_ID:-}
+            ORG_NAME: ${ORG_NAME:-}
+            # Comma-separated; every repo listed is reported combined. This was GITHUB_REPOS, which
+            # is now fatal rather than ignored.
+            ORG_REPOS: ${ORG_REPOS:-}
             BASE_BRANCH: ${BASE_BRANCH:-dev}
             CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-900}
             SYNC_TTL_SECONDS: ${SYNC_TTL_SECONDS:-60}
@@ -29,8 +37,9 @@ services:
         # A factory.toml has to be mounted in, since it is gitignored and dockerignored and so
         # never enters the image. Left commented because compose errors out when a mount source
         # is missing, which would break `docker compose up` for anyone without the file.
-        # Note that every variable above is a *real* value, not an absent one, so it wins over
-        # the file — env-first stays the container's contract.
+        # Note that most variables above are *real* values, not absent ones, so they win over the
+        # file — env-first stays the container's contract. The ORG_* three are the exception, and
+        # deliberately so: see the comment on them.
         # volumes:
         #     - ./factory.toml:/app/factory.toml:ro
         depends_on:

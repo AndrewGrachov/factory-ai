@@ -15,6 +15,9 @@ import { createFixtureTelemetryClient, createNullTelemetryClient } from './telem
 // place outside config.ts that reads the PAT and would otherwise ignore the file's copy of it.
 const { config, env, source } = resolveConfig();
 console.log(`[config] ${source ?? 'no config file; environment only'}`);
+// The id, not just the name: it is the partition every stored row lands in, and a boot pointed at
+// an unexpected one is otherwise silent — the dashboard renders empty and looks like data loss.
+console.log(`[org] ${config.orgName} (${config.orgId})`);
 
 const client =
     config.dataSource === 'fixture'
@@ -37,7 +40,9 @@ function buildDatabase() {
     // database container starts, and blocking on them here would hold the whole dashboard —
     // including the PR metrics, which need no database at all — hostage to it. Every consumer
     // gates its own queries on `ready` and reports unavailable until then.
-    const ready = migrate(sql, { log: (m) => console.log(`[migrate] ${m}`) });
+    // orgId is required: migrate() also adopts pre-organization rows into it, and that adoption is
+    // the only thing standing between a warm database and an empty dashboard.
+    const ready = migrate(sql, { orgId: config.orgId, log: (m) => console.log(`[migrate] ${m}`) });
     ready.catch((e: Error) => console.error(`[migrate] giving up: ${e.message}`));
     return { sql, ready };
 }
@@ -54,8 +59,8 @@ function buildTelemetry(db: { sql: postgres.Sql; ready: Promise<void> } | null) 
 
     const { sql, ready } = db as { sql: postgres.Sql; ready: Promise<void> };
     return {
-        telemetry: createPostgresTelemetryClient({ sql, ready }),
-        store: createPostgresStore({ sql }),
+        telemetry: createPostgresTelemetryClient({ sql, orgId: config.orgId, ready }),
+        store: createPostgresStore({ sql, orgId: config.orgId }),
     };
 }
 
@@ -67,7 +72,7 @@ const { telemetry, store } = buildTelemetry(db);
 // path is precisely the one that would write 203 synthetic PRs into real history.
 const prStore =
     config.persistence === 'postgres' && db
-        ? createPrStore({ sql: db.sql, ready: db.ready })
+        ? createPrStore({ sql: db.sql, orgId: config.orgId, ready: db.ready })
         : undefined;
 console.log(
     prStore

@@ -113,9 +113,9 @@ interface BranchSpan {
 
 export async function backfillTranscripts(
     sql: Sql,
-    options: { root?: string; log?: (message: string) => void } = {},
+    options: { orgId: string; root?: string; log?: (message: string) => void },
 ): Promise<BackfillSummary> {
-    const { root = TRANSCRIPTS, log = () => {} } = options;
+    const { orgId, root = TRANSCRIPTS, log = () => {} } = options;
     const files = transcriptFiles(root);
 
     const points: {
@@ -234,10 +234,10 @@ export async function backfillTranscripts(
     for (const [key, span] of spans) {
         const sessionId = key.split('\u0000')[0] as string;
         await sql`
-            insert into session_branch (agent, session_id, repo, branch, head_sha, first_seen, last_seen, samples)
-            values ('claude-code', ${sessionId}, ${span.repo}, ${span.branch}, null,
+            insert into session_branch (org_id, agent, session_id, repo, branch, head_sha, first_seen, last_seen, samples)
+            values (${orgId}, 'claude-code', ${sessionId}, ${span.repo}, ${span.branch}, null,
                     ${new Date(span.first)}, ${new Date(span.last)}, ${span.samples})
-            on conflict (agent, session_id, repo, branch) do update
+            on conflict (org_id, agent, session_id, repo, branch) do update
                 set first_seen = least(session_branch.first_seen, excluded.first_seen),
                     last_seen  = greatest(session_branch.last_seen, excluded.last_seen),
                     samples    = greatest(session_branch.samples, excluded.samples)
@@ -246,9 +246,9 @@ export async function backfillTranscripts(
 
     for (const link of links.values()) {
         await sql`
-            insert into session_pr (agent, session_id, repo, pr_number, first_seen)
-            values ('claude-code', ${link.sessionId}, ${link.repo}, ${link.prNumber}, ${new Date(link.at)})
-            on conflict (agent, session_id, repo, pr_number) do nothing
+            insert into session_pr (org_id, agent, session_id, repo, pr_number, first_seen)
+            values (${orgId}, 'claude-code', ${link.sessionId}, ${link.repo}, ${link.prNumber}, ${new Date(link.at)})
+            on conflict (org_id, agent, session_id, repo, pr_number) do nothing
         `;
     }
 

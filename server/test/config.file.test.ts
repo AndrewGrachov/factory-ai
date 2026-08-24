@@ -42,11 +42,15 @@ afterEach(() => {
 describe('config file', () => {
     it('loads every section', () => {
         const { config, source } = resolve(`
+[organization]
+id = "acme-org"
+name = "Acme Org"
+repos = ["widgets", "other-owner/gadgets"]
+
 [github]
 source = "github"
 token = "file-token"
 owner = "acme"
-repos = ["widgets", "other-owner/gadgets"]
 base_branch = "main"
 bots = ["botty", "otherbot"]
 
@@ -66,7 +70,11 @@ ttl_seconds = 45
 
         expect(source).toBe(join(dir, 'factory.toml'));
         expect(config.dataSource).toBe('github');
-        // A bare name takes github.owner; a qualified entry keeps its own.
+        expect(config.orgId).toBe('acme-org');
+        expect(config.orgName).toBe('Acme Org');
+        // A bare name takes github.owner; a qualified entry keeps its own. The organization owns
+        // the list, but the owner it falls back to is still a GitHub setting — a Factory
+        // organization is not a GitHub organization.
         expect(config.repos).toEqual([
             { owner: 'acme', name: 'widgets' },
             { owner: 'other-owner', name: 'gadgets' },
@@ -87,8 +95,30 @@ ttl_seconds = 45
     it('scales the cache TTL floor with the repo count', () => {
         // The 300s floor protects a rate-limit budget that is spent once per repo, so two repos
         // on a 300s TTL is the same exposure the floor exists to prevent.
-        expect(() => resolve('[github]\nrepos = ["a", "b"]\n\n[cache]\nttl_seconds = 400\n')).toThrow(
-            /at least 600 for 2 repositories/,
+        expect(() =>
+            resolve('[organization]\nrepos = ["a", "b"]\n\n[cache]\nttl_seconds = 400\n'),
+        ).toThrow(/at least 600 for 2 repositories/);
+    });
+
+    it('names the new home of a moved key rather than calling it unknown', () => {
+        // "unknown key github.repos" reads as a typo in something that demonstrably worked
+        // yesterday, and the reader's next move is to type it again.
+        expect(() => resolve('[github]\nrepos = ["a"]\n')).toThrow(
+            /github\.repos has moved to organization\.repos/,
+        );
+    });
+
+    it('accepts an [organization] table and defaults the id', () => {
+        const { config } = resolve('[organization]\nname = "Leeloo AI"\n');
+        expect(config.orgId).toBe('default');
+        expect(config.orgName).toBe('Leeloo AI');
+    });
+
+    it('names the TOML key when the organization id is illegal', () => {
+        // Pins explain()'s provenance rewriting for the new keys — the only non-mechanical part of
+        // the file layer's half of this change.
+        expect(() => resolve('[organization]\nid = "Leeloo AI"\n')).toThrow(
+            /ORG_ID must be[\s\S]*organization\.id/,
         );
     });
 

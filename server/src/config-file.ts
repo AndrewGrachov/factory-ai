@@ -12,10 +12,13 @@ type Kind = 'string' | 'int' | 'list';
  * reads as a sibling of `telemetry.source`; every other mapping is mechanical.
  */
 const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
+    // First, so the "expected one of" message on an unknown section reads identity-first.
+    'organization.id': { env: 'ORG_ID', kind: 'string' },
+    'organization.name': { env: 'ORG_NAME', kind: 'string' },
+    'organization.repos': { env: 'ORG_REPOS', kind: 'list' },
     'github.source': { env: 'DATA_SOURCE', kind: 'string' },
     'github.token': { env: 'GITHUB_TOKEN', kind: 'string' },
     'github.owner': { env: 'GITHUB_OWNER', kind: 'string' },
-    'github.repos': { env: 'GITHUB_REPOS', kind: 'list' },
     'github.base_branch': { env: 'BASE_BRANCH', kind: 'string' },
     'github.bots': { env: 'BOTS', kind: 'list' },
     'server.port': { env: 'PORT', kind: 'int' },
@@ -29,6 +32,15 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
 };
 
 const SECTIONS = [...new Set(Object.keys(KEYS).map((path) => path.split('.')[0]))];
+
+/**
+ * Keys that were valid in an earlier version. Fatal like any other unknown key, but the message has
+ * to name the new location: "unknown key github.repos" reads as a typo in something that
+ * demonstrably worked yesterday, and the reader's next move is to type it again.
+ */
+const MOVED: Record<string, string> = {
+    'github.repos': 'organization.repos',
+};
 
 export interface FileConfig {
     readonly path: string;
@@ -93,7 +105,15 @@ function flatten(parsed: Record<string, unknown>, path: string): FileConfig {
             // Fatal, unlike an unrecognised environment variable. A config file has a closed key
             // set, so a typo there is a typo — and a tolerated `tokenn` boots silently on
             // fixture data, which is indistinguishable from having no token at all.
-            if (!spec) throw new Error(`${path}: unknown key ${tomlPath}`);
+            if (!spec) {
+                const moved = MOVED[tomlPath];
+                if (moved) {
+                    throw new Error(
+                        `${path}: ${tomlPath} has moved to ${moved} — the organization owns the repo list now. Move the line into an [organization] table and give the organization an id and a name:\n\n    [organization]\n    id = "acme"\n    name = "Acme"\n    repos = [...]\n`,
+                    );
+                }
+                throw new Error(`${path}: unknown key ${tomlPath}`);
+            }
 
             if (spec.kind === 'string') {
                 if (typeof value !== 'string') {

@@ -20,6 +20,19 @@ import { TokenUsagePanel } from './panels/TokenUsagePanel.js';
 import { UsageVsOutcomePanel } from './panels/UsageVsOutcomePanel.js';
 
 export function App() {
+    // The range is state because it is an INPUT the user changes and that must ride the next
+    // request. The organization is not: with one config-defined org it is server-reported identity,
+    // read straight off `meta`, so a useState here would need a value before the first payload
+    // exists and would have to be reconciled against every response — two sources of truth for one
+    // value. When accounts arrive the org becomes an input and the state moves up to here:
+    //
+    //     const [org, setOrg] = useState<string | null>(null);   // null = the server's default
+    //     const query = useMemo(
+    //         () => (org ? `${rangeQuery(range)}&org=${org}` : rangeQuery(range)),
+    //         [range, org],
+    //     );
+    //
+    // useStats keys on the query string, so that re-polls with no change to the hook.
     const [range, setRange] = useState<RangeSelection>(DEFAULT_RANGE);
     const query = useMemo(() => rangeQuery(range), [range]);
     const { data, refreshing, progress, error, refresh } = useStats(query);

@@ -33,6 +33,11 @@ export default defineConfig({
             WEB_ROOT: `${root}web/dist`,
             DATA_SOURCE: 'fixture',
             TELEMETRY_SOURCE: 'fixture',
+            // Pinned, because cwd is the repo root and a developer's gitignored factory.toml is
+            // discovered from there. Environment wins over the file, so the organization assertion
+            // in the spec is deterministic whether or not that file exists.
+            ORG_ID: 'e2e-org',
+            ORG_NAME: 'E2E Org',
         },
         timeout: 180_000,
         // Never reuse: a server left over from a previous edit would verify stale code, which

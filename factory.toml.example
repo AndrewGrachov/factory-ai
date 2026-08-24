@@ -9,6 +9,31 @@
 # An unknown or misspelled key here is fatal, unlike an unrecognised environment variable: a
 # tolerated typo would boot the dashboard on fixture data and look like a missing token.
 
+[organization]
+# Who these figures belong to. One organization per deployment: there are no accounts yet, so
+# nothing selects between organizations and the selector in the upper right of the dashboard is
+# deliberately inert.
+#
+# `id` is a KEY, not a label — it leads every stored primary key and travels in the `?org=` query
+# parameter — so it is restricted to lowercase letters, digits, "-" and "_", may not begin with
+# "__", and anything outside that is rejected rather than quietly cleaned up. Changing it points
+# the dashboard at a different, empty partition, which looks exactly like data loss. Pick it once.
+# Defaults to "default".
+id = "acme"
+
+# Display only, and the one thing shown in the selector. Defaults to `github.owner` below, because
+# a selector reading "default" looks like a bug.
+name = "Acme Inc"
+
+# The landing page reports every repo here combined. An entry may be a bare name, which takes
+# `github.owner` below, or a fully qualified "other-owner/name" — so one organization can draw from
+# several GitHub owners. A Factory organization is not a GitHub organization, and this `id` has
+# nothing to do with `github.owner`.
+#
+# Cost scales: a full fetch is ~243 rate-limit points PER repo against a 5000/hour budget, so the
+# cache TTL floor below is multiplied by the number of repos listed.
+repos = ["leeloo.ai"]
+
 [github]
 # `github` hits the live API; `fixture` serves the committed 203-PR payload with no token.
 source = "fixture"
@@ -19,14 +44,9 @@ source = "fixture"
 #   Contents: read   <- only for the revert rate; without it that one metric reports "unavailable"
 token = ""
 
+# Where a bare entry in `organization.repos` above looks for its repo. Unrelated to the
+# organization's own identity.
 owner = "ExampleOwner"
-
-# The landing page reports every repo here combined. An entry may be a bare name, which takes the
-# owner above, or a fully qualified "other-owner/name".
-#
-# Cost scales: a full fetch is ~243 rate-limit points PER repo against a 5000/hour budget, so the
-# cache TTL floor below is multiplied by the number of repos listed.
-repos = ["leeloo.ai"]
 
 base_branch = "dev"
 

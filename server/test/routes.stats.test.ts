@@ -45,6 +45,14 @@ describe('GET /api/stats', () => {
         expect(body.stats.meta.counts.mergedToBase).toBe(178);
         expect(body.stats.threads.total).toBe(654);
         expect(body.meta.repos).toEqual([{ owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' }]);
+        expect(body.meta.organization).toEqual({
+            mode: 'config',
+            current: { id: 'test-org', name: 'Test Org' },
+            available: [{ id: 'test-org', name: 'Test Org' }],
+        });
+        // The property the selector rests on: one element, equal to current, so the SPA needs no
+        // second endpoint and no mode-specific branch in its markup.
+        expect(body.meta.organization.available).toEqual([body.meta.organization.current]);
         expect(body.meta.baseBranch).toBe('dev');
         expect(body.meta.source).toBe('live');
         expect(body.meta.ageSeconds).toBe(0);
@@ -94,6 +102,59 @@ describe('GET /api/stats', () => {
         );
         await h.settle();
         expect(client.prCalls).toBe(1);
+    });
+});
+
+describe('GET /api/stats organization', () => {
+    const warm = async () => {
+        const h = await harness({ client: stubClient() });
+        app = h.app;
+        await app.inject({ method: 'GET', url: '/api/stats' });
+        await h.settle();
+        return h;
+    };
+
+    it('accepts the organization it serves', async () => {
+        await warm();
+        const res = await app!.inject({ method: 'GET', url: '/api/stats?org=test-org' });
+        expect(res.statusCode).toBe(200);
+        expect(res.json().meta.organization.current.id).toBe('test-org');
+    });
+
+    it("rejects an unknown organization, never another organization's figures", async () => {
+        await warm();
+        const res = await app!.inject({ method: 'GET', url: '/api/stats?org=other-org' });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().code).toBe('UNKNOWN_ORG');
+        // Names the one it does serve: the reader's next question is always "then which?".
+        expect(res.json().error).toMatch(/test-org/);
+    });
+
+    it('treats an empty ?org= as unset, like every other empty value', async () => {
+        await warm();
+        expect((await app!.inject({ method: 'GET', url: '/api/stats?org=' })).statusCode).toBe(200);
+    });
+
+    it('rejects an unknown organization before the cold-start 202', async () => {
+        // A bad request is a bad request whatever the cache is doing. Answering 202 here would
+        // have the client poll forever for a request that can never succeed.
+        const client = stubClient({ prs: () => new Promise(() => {}) });
+        const h = await harness({ client });
+        app = h.app;
+
+        const res = await app.inject({ method: 'GET', url: '/api/stats?org=nope' });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().code).toBe('UNKNOWN_ORG');
+    });
+
+    it('reports the organization, not the range, when both are wrong', async () => {
+        // Pins the guard's placement ahead of parseRange. Without this the ordering is untested and
+        // a future reshuffle is invisible — and the organization decides WHICH data set is being
+        // ranged, so it is the more fundamental of the two errors.
+        await warm();
+        const res = await app!.inject({ method: 'GET', url: '/api/stats?org=nope&range=fortnight' });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().code).toBe('UNKNOWN_ORG');
     });
 });
 

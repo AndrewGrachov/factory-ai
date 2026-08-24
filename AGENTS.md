@@ -207,6 +207,74 @@ them. Do not "simplify" them.
 - **When a PR page times out, shrink the nested selections, not `PAGE_SIZE` (25).** Per-page cost
   is superlinear in the nested connections.
 
+### Organizations
+
+An **organization owns the repo list and partitions every stored row.** There is exactly one per
+deployment, defined by `[organization]` in `factory.toml`, with no accounts and no memberships —
+`meta.organization.mode` is the literal `'config'`. The selector in the topbar is a real
+`<select disabled>`; mode 2 turns it on by dropping one attribute.
+
+- **`ORG_ID` defaults to the literal `default`, and `ORG_NAME` to `GITHUB_OWNER`.** The id leads
+  every org-owned primary key, so deriving it from the owner would re-key every persisted row the
+  day the owner changed — the dashboard comes back empty and reads as data loss, not as a config
+  change. A *label* can be derived for free, because nothing keys on one. Requiring `ORG_ID` was
+  rejected: it breaks every existing `loadConfig({})` case, and AGENTS.md already names that as the
+  signal not to require, not as an obstacle to work around.
+- **The id is rejected, never normalised** (`^[a-z0-9][a-z0-9_-]{0,38}$`, no leading `__`). It is
+  simultaneously a database key and a URL parameter, and a case-insensitive collision in a key is
+  invisible: `Leeloo` and `leeloo` are two partitions that read as one. Silently lowercasing would
+  leave the file, the database and the query string disagreeing.
+- **`GITHUB_REPOS` and `github.repos` are fatal, not ignored.** The one deliberate exception to "an
+  unknown environment variable is ignored", and for exactly the reason that rule is stated: a
+  variable that *was* meaningful and is now dropped reverts a two-repo dashboard to one repo and
+  still renders, indistinguishable from a repo genuinely removed. The file-layer message names
+  `organization.repos` rather than saying "unknown key", because a key that demonstrably worked
+  yesterday reads as a typo and the reader's next move is to type it again.
+- **A Factory organization is not a GitHub organization.** `organization.repos` still resolves bare
+  entries against `github.owner`, and a qualified `other-owner/name` keeps its own, so one
+  organization can span several GitHub owners. `organization.id` has nothing to do with
+  `github.owner`; do not "simplify" by deleting one.
+- **`org_id` leads every org-owned primary key** across ten tables (`pull_request` + its four
+  children, `branch_commit`, `branch_history`, `sync_state`, `session_branch`, `session_pr`). It
+  leads rather than trails `provider` because a query always knows its organization, so the key is
+  a prefix scan of the partition rather than a filter applied afterwards. Guarded by
+  `pr-store.test.ts` → "keeps the same PR number under two organizations apart" and
+  "a complete child list does not delete another organization's rows".
+- **`metric_point` has no `org_id`, on purpose.** It has no `repo` either, for the reason stated in
+  `001_init.sql`: a datapoint's repo is resolved by joining `session_branch`, so there is one source
+  of truth rather than two that disagree. Its organization comes through that same join. Adding the
+  column would mean a second source of truth *and* rebuilding a unique index on a hypertable.
+  Consequence: a session with metrics but no `session_branch` row belongs to no organization, which
+  is why `session_summary` is read with `org_id = $1 or org_id is null` — those rows are exactly
+  what `sessionsWithoutHook` counts, and filtering them would make a broken hook look like an idle
+  week. Guarded by "still reports a hook-less session, which belongs to no organization".
+- **Pre-organization rows are backfilled `'__unclaimed__'` and adopted once, at boot.**
+  `005_organizations.sql` cannot see the config, and backfilling the configured id directly would
+  point a deployment that sets `ORG_ID=leeloo` at an empty partition: **200 OK, zero PRs, no log
+  line**. `adoptOrg()` in `db/migrate.ts` claims them, which is why `migrate()` takes a required
+  `orgId` and why `config.ts` refuses any id beginning with `__`.
+- **The four child FKs are `on update cascade`, and `ORG_OWNED` deliberately omits those tables.**
+  `org_id` is part of the reference, so adoption is an update to a referenced key and there is no
+  legal order to do it in by hand: children first orphans them, parents first strands them. The
+  cascade moves them with their parent. Listing a child in `ORG_OWNED` is not redundant but *wrong*
+  — before its parent it violates the constraint, after it the statement matches nothing.
+- **`session_branch_slice` partitions its `lead()` window by `org_id`, not merely projects it.**
+  Otherwise the clamp runs across organizations and one org's slice is truncated by another's start,
+  silently dropping the datapoints in between. Guarded by "does not attribute one organization's
+  session to another's branch".
+- **`SCHEMA_EPOCH` was not bumped.** It forces a full resync when a newly *selected provider field*
+  leaves old rows null. `org_id` is backfilled and adopted, so no row is stale.
+- **There is no `OrgProvider` interface, deliberately.** `TokenProvider` and `ForgeClient` are the
+  tempting precedents, but both ship two implementations already in tree and both have a signature
+  that was load-bearing on day one. A directory's org list is per *user*, so its real signature is
+  `resolve(caller, orgId)` in a codebase with no caller, no session and no auth — the interface
+  would change shape the day its second implementation arrived, having bought nothing but a
+  provider threaded through `buildApp` and the service deps. The room mode 2 needs is in the *data
+  shape* (`mode` + `available[]`) and in the store's construction-time org binding. Do not add one
+  later for symmetry.
+- **The store binds `orgId` at construction**, not per call: it is a constant for the life of the
+  process, and it is the shape a request-scoped store needs later anyway.
+
 ### The combined repo view
 
 The landing page reports **every repo in `config.repos` as one set of figures**. Per-repo pages
@@ -267,7 +335,14 @@ record, so env wins by merge order.
 - **An unknown key in the file is fatal; an unknown environment variable is ignored.** Same
   asymmetry as the attribute allowlist vs the metric denylist, for the same kind of reason: a file
   has a closed key set, so `tokenn` is a typo — and a tolerated one boots the dashboard on
-  fixture data, indistinguishable from having no token.
+  fixture data, indistinguishable from having no token. `GITHUB_REPOS` is the single exception on
+  the environment side; see the Organizations section for why.
+- **`ORG_ID`, `ORG_NAME` and `ORG_REPOS` are empty-defaulted in `docker-compose.yml`**, unlike most
+  of that block. Every other variable there is a real value that beats a mounted file by design,
+  but the org id leads every stored primary key — a literal default would clobber the file's
+  `organization.id` on every start and repartition the database under the operator. `ORG_REPOS`
+  follows suit, one step less severe. This also fixes the pre-existing case where
+  `GITHUB_REPOS: ${GITHUB_REPOS:-leeloo.ai}` silently overrode a mounted file's repo list.
 - **A missing `FACTORY_CONFIG` path is fatal; a missing default path is silent.** One is an
   explicit request that could not be honoured, the other is the supported env-only mode that the
   test suite and CI run in.
@@ -478,11 +553,26 @@ logic through `memoryPrStore()` in `server/test/helpers.ts`.
 | Route | Behaviour |
 | --- | --- |
 | `GET /api/health` | Never calls GitHub or the database, so a token-less, DB-less container still reports healthy. |
-| `GET /api/stats` | `200` with `{ stats, telemetry, meta }`; `202` with progress while a cold fetch runs (SPA polls every 2s); `503` only if the first PR fetch failed **and** nothing is persisted. A cold boot with a warm database is a 200 because the seed landed — but both other codes stay reachable and deleting either is a regression. `telemetry` is `null` when unavailable, and `meta.persistence` degrades in four states (`ok` / `migrating` / `unavailable` / `off`); neither is ever a reason for a non-200. `?range=day\|week\|2w\|month\|all\|custom` (default `all`), plus `?from=&to=` for `custom`; `400 BAD_RANGE` on anything unparseable, never a silent fallback to all time. |
+| `GET /api/stats` | `200` with `{ stats, telemetry, meta }`; `202` with progress while a cold fetch runs (SPA polls every 2s); `503` only if the first PR fetch failed **and** nothing is persisted. A cold boot with a warm database is a 200 because the seed landed — but both other codes stay reachable and deleting either is a regression. `telemetry` is `null` when unavailable, and `meta.persistence` degrades in four states (`ok` / `migrating` / `unavailable` / `off`); neither is ever a reason for a non-200. `?range=day\|week\|2w\|month\|all\|custom` (default `all`), plus `?from=&to=` for `custom`; `400 BAD_RANGE` on anything unparseable, never a silent fallback to all time. `?org=` is accepted and `400 UNKNOWN_ORG` on a mismatch — see below. |
 | `POST /api/refresh` | `202`. Single-flight. Refreshes both caches. |
 | `POST /api/otlp/v1/metrics` | `200 {"partialSuccess":{}}`. 1 MB limit, JSON only. Registered only when a store exists. |
 | `POST /api/otlp/v1/logs` | `200`. Accepted and dropped — see M6 in the plan. |
 | `POST /api/sessions/branch` | `202`. `400` on a malformed body, never 5xx. |
+
+- **`meta.organization.mode` is a discriminant, never inferred from `available.length > 1`.** A
+  directory user with one membership can be granted a second with no deploy; a control disabled by
+  list length is right today by accident and silently wrong then.
+- **`400 UNKNOWN_ORG` is checked before `parseRange` and before `ensureFresh()`.** The organization
+  selects *which* data set is being ranged, so it is the more fundamental error, and a bad request
+  must never be answered with a 202 the client then polls forever. Rejected rather than ignored, and
+  the `BAD_RANGE` precedent understates the reason: an ignored range at least echoes in
+  `meta.range` where a reader could notice, whereas an ignored `?org=` would echo
+  `meta.organization.current` as the configured org and render one organization's figures under a
+  heading the caller did not ask for. Once the store is partitioned, "trust the parameter" must
+  never become a habit — the day auth lands, that habit is a cross-tenant read. Guarded by
+  "reports the organization, not the range, when both are wrong", which is what pins the ordering.
+- **`org` goes no further than the guard.** The service knows the only organization there is, and a
+  parameter it ignores is worse than no parameter.
 
 ## Security posture
 
@@ -526,3 +616,12 @@ database, and the attribute allowlist does not save you: that content arrives as
   can be missed.
 - `POST /api/otlp/v1/logs` accepts and discards. `prompt.id` and `message.uuid` are only worth
   storing once there is a per-prompt view to spend them on.
+- **The two cache slots in `cache.ts` are process-global.** Correct for one organization, and the
+  actual blocker for multi-tenancy — not the store signature, which is already org-bound. A second
+  organization needs a slot per organization, or every request serves the first one's snapshot.
+- **`session_branch.branch` is documented nullable ("null on detached HEAD") but sits in the
+  primary key**, so postgres has rejected those rows since `001_init.sql`. `recordBranch` and
+  `transcripts.ts` both try to write them and `routes.ingest.test.ts` cannot catch it because it
+  asserts against a stub. `005_organizations.sql` preserves the constraint deliberately rather than
+  fixing it in passing: the repair is a unique index over `coalesce(branch, '')`, which changes the
+  `on conflict` target in three write paths and deserves its own review.

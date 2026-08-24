@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DateRange, Stats, TelemetryStats } from '@factory-ai/core';
+import type { DateRange, OrganizationMeta, Stats, TelemetryStats } from '@factory-ai/core';
 
 export interface RateLimit {
     remaining: number;
@@ -33,6 +33,12 @@ export interface StatsPayload {
         source: 'live' | 'fixture';
         rateLimit: RateLimit | null;
         revert: { status: 'ok' | 'unavailable'; reason: string | null };
+        /**
+         * Imported from core rather than restated here, unlike TelemetryMeta above:
+         * `current.id` round-trips back to the server as `?org=` and on to a database partition,
+         * and a hand-copied key that drifts is a partition mismatch, not a cosmetic difference.
+         */
+        organization: OrganizationMeta;
         /** Every repo the figures combine. Length 1 is the common case, not a special case. */
         repos: { owner: string; name: string }[];
         baseBranch: string;

@@ -42,11 +42,11 @@ describe('persistence is derived, not configured', () => {
 describe('the sync TTL floor', () => {
     it('defaults to a minute and scales with the repo count', () => {
         expect(loadConfig({}).syncTtlMs).toBe(60_000);
-        expect(loadConfig({ GITHUB_REPOS: 'a,b,c' }).syncTtlMs).toBe(180_000);
+        expect(loadConfig({ ORG_REPOS: 'a,b,c' }).syncTtlMs).toBe(180_000);
     });
 
     it('rejects a value under the floor, so the cheap path stays cheap', () => {
-        expect(() => loadConfig({ GITHUB_REPOS: 'a,b', SYNC_TTL_SECONDS: '60' })).toThrow(
+        expect(() => loadConfig({ ORG_REPOS: 'a,b', SYNC_TTL_SECONDS: '60' })).toThrow(
             /at least 120/,
         );
     });

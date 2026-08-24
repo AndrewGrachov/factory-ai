@@ -40,6 +40,8 @@ export const EMPTY_TELEMETRY: TelemetryInput = {
 
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     return {
+        orgId: 'test-org',
+        orgName: 'Test Org',
         repos: [{ owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' }],
         baseBranch: 'dev',
         bots: ['claude', 'claude[bot]', 'github-actions', 'github-actions[bot]', 'leeloo-frontend-fix-bot'],

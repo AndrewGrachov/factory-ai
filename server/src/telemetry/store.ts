@@ -19,7 +19,14 @@ export interface TelemetryStore {
     recordBranch(report: SessionBranchReport): Promise<void>;
 }
 
-export function createPostgresStore({ sql }: { sql: Sql }): TelemetryStore {
+/**
+ * `orgId` is bound at construction for the same reason the PR store binds it: it is a constant for
+ * the life of the process, and a per-call parameter is one more thing an ingest route can forget.
+ *
+ * Note that `insertMetrics` does not stamp it. metric_point has no org column on purpose — a
+ * datapoint's organization is resolved through session_branch, exactly as its repo is.
+ */
+export function createPostgresStore({ sql, orgId }: { sql: Sql; orgId: string }): TelemetryStore {
     return {
         async insertMetrics(rows) {
             if (!rows.length) return 0;
@@ -52,9 +59,9 @@ export function createPostgresStore({ sql }: { sql: Sql }): TelemetryStore {
             // branch that was held for some span, and the span is what the attribution join
             // intersects against.
             await sql`
-                insert into session_branch (agent, session_id, repo, branch, head_sha, first_seen, last_seen, samples)
-                values (${agent}, ${sessionId}, ${repo}, ${branch}, ${headSha}, ${when}, ${when}, 1)
-                on conflict (agent, session_id, repo, branch) do update
+                insert into session_branch (org_id, agent, session_id, repo, branch, head_sha, first_seen, last_seen, samples)
+                values (${orgId}, ${agent}, ${sessionId}, ${repo}, ${branch}, ${headSha}, ${when}, ${when}, 1)
+                on conflict (org_id, agent, session_id, repo, branch) do update
                     set first_seen = least(session_branch.first_seen, excluded.first_seen),
                         last_seen  = greatest(session_branch.last_seen, excluded.last_seen),
                         head_sha   = coalesce(excluded.head_sha, session_branch.head_sha),

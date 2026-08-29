@@ -11,7 +11,7 @@ checkout; it does not build or run this repo's application.
 | `claude-home/` | `/home/node/.claude` inside the image, via `CLAUDE_CONFIG_DIR` |
 | `claude-home/settings.json` | telemetry configuration |
 | `claude-home/CLAUDE.md` | the global instructions every session loads |
-| `claude-home/skills/` | `github` and `jira` — loaded on demand, not every session |
+| `claude-home/skills/` | `github`, `jira`, `backend-fix` — loaded on demand, not every session |
 
 `claude-home/` is the predefined configuration folder. Whatever you drop in it ships in the image —
 add `agents/`, `commands/` or `hooks/` and they need no Dockerfile change.

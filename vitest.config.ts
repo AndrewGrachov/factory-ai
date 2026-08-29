@@ -11,5 +11,13 @@ export default defineConfig({
             'web/test/**/*.test.tsx',
         ],
         pool: 'forks',
+        coverage: {
+            provider: 'v8',
+            // 'lcov' is what Sonar ingests; 'text' is for reading here. Both, or CI is silent.
+            reporter: ['text', 'lcov'],
+            include: ['core/src/**', 'server/src/**', 'web/src/**', 'driver/src/**'],
+            // Measured but never executed by this suite, so they only dilute the percentage.
+            exclude: ['**/*.d.ts', 'web/src/main.tsx', 'server/src/index.ts'],
+        },
     },
 });

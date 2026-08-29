@@ -4,7 +4,7 @@ COPY package.json package-lock.json ./
 COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 FROM deps AS build
 WORKDIR /app
@@ -12,7 +12,9 @@ COPY tsconfig.base.json tsconfig.json ./
 COPY core core
 COPY server server
 COPY web web
-RUN npm run build
+# Not `npm run build`: that one also builds the driver, which ships as its own image and whose
+# sources are deliberately not copied here. Running it would fail on --workspace=driver.
+RUN npm run build -w core && npm run build -w server && npm run build -w web
 
 FROM node:24-alpine AS runtime
 WORKDIR /app
@@ -21,7 +23,7 @@ COPY package.json package-lock.json ./
 COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 # node:24-alpine ships no git, and the workspace reconcile shells out to it. Absent, the failure is
 # an ENOENT per repo that only ever appears in the container, never in dev.
 RUN apk add --no-cache git

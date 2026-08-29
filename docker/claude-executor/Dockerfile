@@ -12,7 +12,12 @@
 # be smaller but adds a network-dependent layer that breaks behind a TLS-intercepting proxy.
 FROM node:24-bookworm
 
-ARG CLAUDE_CODE_VERSION=latest
+# Pinned, not `latest`: two builds of the same commit must produce the same CLI, or a runner that
+# starts misbehaving gives no way to tell a code change from a silent upgrade underneath it.
+# No --ignore-scripts here, deliberately. The postinstall is what places the native binary, and
+# without it the CLI installs cleanly and then fails at run time with
+# "Error: claude native binary not installed."
+ARG CLAUDE_CODE_VERSION=2.1.251
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
     && npm cache clean --force
 
@@ -20,7 +25,9 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
 # is deliberately not configured. TARGETARCH is amd64/arm64, which is exactly how the download
 # paths are named, so no mapping table is needed.
 ARG TARGETARCH
-RUN curl -fsSL -o /usr/local/bin/acli \
+# --proto '=https' applies to the redirects -L follows, not just to the URL written here: without
+# it a redirect to http:// is honoured, and the binary this installs arrives over plain HTTP.
+RUN curl -fsSL --proto '=https' --tlsv1.2 -o /usr/local/bin/acli \
         "https://acli.atlassian.com/linux/latest/acli_linux_${TARGETARCH}/acli" \
     && chmod 0755 /usr/local/bin/acli \
     && acli --version
@@ -29,7 +36,7 @@ RUN curl -fsSL -o /usr/local/bin/acli \
 # without it every one of those instructions ends in "command not found". Static release tarball
 # rather than apt, for the same proxy reason as the base image choice.
 ARG GH_VERSION=2.98.0
-RUN curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+RUN curl -fsSL --proto '=https' --tlsv1.2 "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
         | tar -xz -C /tmp \
     && mv "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh \
     && rm -rf "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}" \

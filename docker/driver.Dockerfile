@@ -13,7 +13,7 @@ COPY core/package.json core/
 COPY server/package.json server/
 COPY web/package.json web/
 COPY driver/package.json driver/
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 FROM deps AS build
 WORKDIR /app

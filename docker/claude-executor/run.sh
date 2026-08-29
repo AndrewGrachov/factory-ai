@@ -1,45 +1,47 @@
 #!/usr/bin/env bash
 # Start a Remote Control session in the container, against the current directory.
 #
+#   docker/claude-executor/run.sh login           # once: sign in to claude.ai
 #   docker/claude-executor/run.sh                 # session named after the directory
-#   docker/claude-executor/run.sh my-session      # named session
+#   docker/claude-executor/run.sh my-session
 #   TARGET=~/src/api docker/claude-executor/run.sh
 #
-# Reads CLAUDE_CODE_OAUTH_TOKEN from the repo's .env and passes that one variable. Nothing else in
-# .env is forwarded: an agent in the container has no business holding the GitHub PAT or the
-# database URL, and --env-file would hand it both.
+# Remote Control needs a FULL-SCOPE claude.ai login. The CLAUDE_CODE_OAUTH_TOKEN in .env is not one:
+# `claude setup-token` mints a model-requests-only token, and a session started with it silently
+# degrades to an ordinary local session. So this script does not pass that token at all — it mounts
+# a named volume holding the login instead, and `run.sh login` is how the login gets there.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/../.." && pwd)"
 
 IMAGE="${IMAGE:-claude-executor}"
-ENV_FILE="${ENV_FILE:-$REPO/.env}"
+VOLUME="${AUTH_VOLUME:-claude-executor-auth}"
 TARGET="$(cd "${TARGET:-$PWD}" && pwd)"
-SESSION="${1:-$(basename "$TARGET")}"
-[ $# -gt 0 ] && shift
-
-token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
-if [[ -z "$token" ]]; then
-    if [[ ! -f "$ENV_FILE" ]]; then
-        echo "run.sh: no CLAUDE_CODE_OAUTH_TOKEN in the environment and no $ENV_FILE to read." >&2
-        exit 2
-    fi
-    # One key, read with grep rather than sourcing the file: sourcing executes it, and .env is
-    # deliberately gitignored, so its contents are whatever happens to be on this machine.
-    token="$(grep -m1 -E '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'\''' | xargs)"
-fi
-
-if [[ -z "$token" ]]; then
-    echo "run.sh: CLAUDE_CODE_OAUTH_TOKEN is empty or absent in $ENV_FILE." >&2
-    echo "Generate one with: claude setup-token" >&2
-    exit 2
-fi
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "building $IMAGE"
     docker build -q -t "$IMAGE" "$HERE" >/dev/null
 fi
+
+# The volume holds the credential and the account record. Both live under CLAUDE_CONFIG_DIR, so the
+# whole directory is the volume, and the entrypoint seeds it from the image on first use.
+mount=(-v "$VOLUME:/home/node/.claude")
+
+if [[ "${1:-}" == "login" ]]; then
+    echo "Signing in to claude.ai. The browser cannot reach the container's callback, so the CLI"
+    echo "will print a URL: open it on this machine, then paste the code back at the prompt."
+    exec docker run --rm -it "${mount[@]}" -v "$TARGET:/workspace" "$IMAGE" auth login
+fi
+
+if ! docker run --rm "${mount[@]}" --entrypoint test "$IMAGE" -f /home/node/.claude/.credentials.json; then
+    echo "run.sh: no claude.ai login in volume '$VOLUME'." >&2
+    echo "Remote Control requires a full-scope login — the .env token cannot establish one." >&2
+    echo "Run: $0 login" >&2
+    exit 2
+fi
+
+SESSION="${1:-$(basename "$TARGET")}"
+[ $# -gt 0 ] && shift
 
 echo "remote control: $SESSION   workdir: $TARGET"
 
@@ -47,7 +49,7 @@ echo "remote control: $SESSION   workdir: $TARGET"
 # answer. Mounting a directory here is that decision already; see the README for what it implies
 # when the checkout ships a .claude/settings.local.json.
 exec docker run --rm -it \
-    -e CLAUDE_CODE_OAUTH_TOKEN="$token" \
     -e TRUST_WORKDIR=1 \
+    "${mount[@]}" \
     -v "$TARGET:/workspace" \
     "$IMAGE" --remote-control "$SESSION" "$@"

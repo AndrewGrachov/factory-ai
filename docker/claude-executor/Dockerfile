@@ -43,7 +43,7 @@ ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 COPY --chown=node:node claude-home/ /home/node/.claude/
 
 # Bind-mounted at runtime. Owned by node so the CLI can write into the checkout.
-RUN mkdir -p /workspace && chown node:node /workspace
+RUN mkdir -p /workspace /opt/claude-home && chown node:node /workspace /opt/claude-home
 WORKDIR /workspace
 
 COPY entrypoint.sh /usr/local/bin/claude-executor
@@ -66,6 +66,11 @@ RUN claude plugin marketplace add mksglu/context-mode \
 RUN node -e "const f=process.env.CLAUDE_CONFIG_DIR+'/.claude.json',fs=require('fs'); \
     const c=JSON.parse(fs.readFileSync(f,'utf8')); c.hasCompletedOnboarding=true; \
     c.theme='dark'; fs.writeFileSync(f,JSON.stringify(c,null,2));"
+
+# Keep a pristine copy of the finished config. Remote Control needs a full-scope login, and a login
+# only survives the container if CLAUDE_CONFIG_DIR is a volume — which mounts empty and hides
+# everything above it. The entrypoint seeds the volume from here on first run.
+RUN cp -a /home/node/.claude/. /opt/claude-home/
 
 # The wrapper cds into $WORKDIR (default /workspace) before exec'ing claude with every argument
 # given after the image name, so a caller can point one image at a subdirectory or at a second

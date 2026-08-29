@@ -8,6 +8,14 @@ set -eu
 WORKDIR="${WORKDIR:-/workspace}"
 export WORKDIR
 
+# A volume mounted at CLAUDE_CONFIG_DIR — which is how a full-scope login survives the container,
+# and so the only way Remote Control works — starts empty and hides the baked configuration behind
+# it. Seed it once from the pristine copy. Keyed on settings.json rather than on the directory being
+# empty, since the CLI writes .claude.json before anything else asks a question.
+if [ ! -f "$CLAUDE_CONFIG_DIR/settings.json" ] && [ -d /opt/claude-home ]; then
+    cp -a /opt/claude-home/. "$CLAUDE_CONFIG_DIR/"
+fi
+
 if [ ! -d "$WORKDIR" ]; then
     echo "claude-executor: WORKDIR '$WORKDIR' does not exist." >&2
     echo "Mount a checkout at it, e.g. -v \"\$PWD:/workspace\"." >&2

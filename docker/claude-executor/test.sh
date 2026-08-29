@@ -55,6 +55,15 @@ check 'trust is opt-in'   'false' run --entrypoint sh "$IMAGE" -c \
 check 'TRUST_WORKDIR opts in' 'true' run -e TRUST_WORKDIR=1 --entrypoint sh "$IMAGE" -c \
     'claude-executor --version >/dev/null; node -e "const c=require(process.env.CLAUDE_CONFIG_DIR+\"/.claude.json\"); console.log(Boolean(c.projects[\"/workspace\"].hasTrustDialogAccepted))"'
 
+# A volume at CLAUDE_CONFIG_DIR is what makes a Remote Control login survive the container, and it
+# mounts empty over the baked configuration. Seeding is therefore load-bearing, not a nicety.
+VOL="claude-executor-test-$$"
+check 'seeds an empty volume' 'backend-fix' docker run --rm -v "$VOL:/home/node/.claude" \
+    --entrypoint sh "$IMAGE" -c 'claude-executor --version >/dev/null; ls "$CLAUDE_CONFIG_DIR"/skills'
+check 'seeding is idempotent' 'ok' docker run --rm -v "$VOL:/home/node/.claude" \
+    --entrypoint sh "$IMAGE" -c 'claude-executor --version >/dev/null; echo marker > "$CLAUDE_CONFIG_DIR"/keep; claude-executor --version >/dev/null; [ -f "$CLAUDE_CONFIG_DIR"/keep ] && echo ok'
+docker volume rm "$VOL" >/dev/null 2>&1
+
 # A bind mount carries the host uid, so without safe.directory git refuses the repository outright.
 # Note the single line: a backslash continuation inside single quotes is a literal backslash, not a
 # continuation, and the container would receive a broken script that fails silently.

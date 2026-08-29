@@ -92,25 +92,52 @@ docker run --rm -it \
 
 `ANTHROPIC_API_KEY` works in place of `CLAUDE_CODE_OAUTH_TOKEN`.
 
+## Two credentials, for two different things
+
+They are not interchangeable, and the difference is not cosmetic:
+
+| | Headless (`-p`) | Remote Control |
+| --- | --- | --- |
+| Credential | `CLAUDE_CODE_OAUTH_TOKEN` from `.env` | a full-scope claude.ai login |
+| Comes from | `claude setup-token` | `run.sh login` |
+| Lives in | the environment, per run | a named docker volume |
+
+A `setup-token` token can **only make model requests**. It cannot establish a Remote Control
+session — and the failure is quiet: `claude --remote-control` still starts a perfectly normal
+interactive session, so the only symptom is that the session never appears at claude.ai/code. (The
+docs are explicit: *"Remote Control requires a full-scope login token… these tokens can only make
+model requests"*.) Remote Control also needs a Pro, Max, Team or Enterprise plan; API keys are not
+supported at all.
+
+So `run.sh` does **not** pass the `.env` token. `test.sh` still does, because a headless prompt is
+exactly what that token is for.
+
 ## Interactive: Remote Control
 
 ```bash
+docker/claude-executor/run.sh login          # once — sign in to claude.ai
 docker/claude-executor/run.sh                # session named after the current directory
 docker/claude-executor/run.sh my-session
 TARGET=~/src/api docker/claude-executor/run.sh
 ```
 
-`run.sh` reads **only** `CLAUDE_CODE_OAUTH_TOKEN` out of the repo's `.env` and passes that one
-variable, then starts `claude --remote-control <session>` with the current directory mounted. It
-does not use `--env-file`: the same `.env` holds `GITHUB_TOKEN` and `DATABASE_URL`, and an agent in
-a container has no business holding either. The file is read with `grep`, not sourced — sourcing
-executes it.
+`run.sh login` prints an OAuth URL: open it on this machine, then paste the code back at the
+prompt. The container's callback server is unreachable from the host browser, which is exactly the
+case the paste flow exists for.
 
-It builds the image first if it is missing, and exits `2` with a message if no token is found in
-the environment or in `.env` (`claude setup-token` generates one).
+The login lands in `.credentials.json` under `CLAUDE_CONFIG_DIR`, so it dies with `--rm` unless
+that directory is a volume. `run.sh` mounts `claude-executor-auth` there (override with
+`AUTH_VOLUME`). A volume mounts *empty* and hides the baked configuration behind it, so the
+entrypoint seeds it from `/opt/claude-home` on first use — the image keeps a pristine copy for
+exactly this. Seeding is keyed on `settings.json` being absent, so it never overwrites a later
+login. After rebuilding the image, `docker volume rm claude-executor-auth` to pick up config
+changes.
 
-Two prompts stand between a cold container and a usable interactive session, and neither has anyone
-to answer it:
+Without a login in the volume, `run.sh` exits `2` and points at `run.sh login` rather than starting
+a session that silently is not remote-controlled.
+
+Two more prompts stand between a cold container and a usable interactive session, and neither has
+anyone to answer it:
 
 - **First-run onboarding** (the theme picker) is settled at build time in the image's
   `.claude.json`.

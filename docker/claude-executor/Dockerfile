@@ -25,6 +25,16 @@ RUN curl -fsSL -o /usr/local/bin/acli \
     && chmod 0755 /usr/local/bin/acli \
     && acli --version
 
+# GitHub CLI. The github skill and CLAUDE.md both instruct agents to reach GitHub through `gh`, and
+# without it every one of those instructions ends in "command not found". Static release tarball
+# rather than apt, for the same proxy reason as the base image choice.
+ARG GH_VERSION=2.98.0
+RUN curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+        | tar -xz -C /tmp \
+    && mv "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh \
+    && rm -rf "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}" \
+    && gh --version
+
 ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 
 # The predefined configuration. Everything under claude-home/ lands in the config directory as-is:
@@ -48,6 +58,14 @@ USER node
 # node because it writes into CLAUDE_CONFIG_DIR; as root it would leave the files unwritable.
 RUN claude plugin marketplace add mksglu/context-mode \
     && claude plugin install context-mode@context-mode
+
+# Mark first-run onboarding done. Without this the CLI opens the theme picker and waits for a
+# keypress, which an unattended container never sends — `--remote-control` in particular hangs on a
+# prompt nobody can see. Merged into the file the CLI just wrote rather than replacing it, since it
+# already holds a generated machineID and userID.
+RUN node -e "const f=process.env.CLAUDE_CONFIG_DIR+'/.claude.json',fs=require('fs'); \
+    const c=JSON.parse(fs.readFileSync(f,'utf8')); c.hasCompletedOnboarding=true; \
+    c.theme='dark'; fs.writeFileSync(f,JSON.stringify(c,null,2));"
 
 # The wrapper cds into $WORKDIR (default /workspace) before exec'ing claude with every argument
 # given after the image name, so a caller can point one image at a subdirectory or at a second

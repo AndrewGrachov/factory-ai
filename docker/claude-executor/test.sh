@@ -35,6 +35,7 @@ run() { docker run --rm -v "$REPO:/workspace" "$@"; }
 
 check 'claude runs'            'Claude Code'      run "$IMAGE" --version
 check 'acli installed'         'acli version'     run --entrypoint acli "$IMAGE" --version
+check 'gh installed'           'gh version'       run --entrypoint gh "$IMAGE" --version
 check 'plugin enabled'         'context-mode'     run --entrypoint claude "$IMAGE" plugin list
 check 'CLAUDE.md present'      'Agent guide'      run --entrypoint head "$IMAGE" -1 /home/node/.claude/CLAUDE.md
 check 'skills present'         'backend-fix'      run --entrypoint ls "$IMAGE" /home/node/.claude/skills
@@ -45,6 +46,15 @@ check 'honours WORKDIR'        '/workspace/server' run -e WORKDIR=/workspace/ser
     'cd "$WORKDIR" && pwd'
 check 'rejects bad WORKDIR'    'does not exist'   run -e WORKDIR=/nope "$IMAGE" --version
 
+# Both prompts an unattended container cannot answer. Onboarding is settled at build time; trust is
+# opt-in per run, so the default must still be false.
+check 'onboarding done'   'true'  run --entrypoint node "$IMAGE" -e \
+    'console.log(require(process.env.CLAUDE_CONFIG_DIR + "/.claude.json").hasCompletedOnboarding)'
+check 'trust is opt-in'   'false' run --entrypoint sh "$IMAGE" -c \
+    'claude-executor --version >/dev/null; node -e "const c=require(process.env.CLAUDE_CONFIG_DIR+\"/.claude.json\"); console.log(Boolean((c.projects||{})[\"/workspace\"]))"'
+check 'TRUST_WORKDIR opts in' 'true' run -e TRUST_WORKDIR=1 --entrypoint sh "$IMAGE" -c \
+    'claude-executor --version >/dev/null; node -e "const c=require(process.env.CLAUDE_CONFIG_DIR+\"/.claude.json\"); console.log(Boolean(c.projects[\"/workspace\"].hasTrustDialogAccepted))"'
+
 # A bind mount carries the host uid, so without safe.directory git refuses the repository outright.
 # Note the single line: a backslash continuation inside single quotes is a literal backslash, not a
 # continuation, and the container would receive a broken script that fails silently.
@@ -54,15 +64,22 @@ check 'git reads the mount' 'true' run --entrypoint sh "$IMAGE" -c 'claude-execu
 MCP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}'
 check 'context-mode responds' '"name":"context-mode"' run -i --entrypoint sh "$IMAGE" -c "p=\$(ls -d \"\$CLAUDE_CONFIG_DIR\"/plugins/cache/context-mode/context-mode/*/); echo '$MCP_INIT' | timeout 60 node \"\${p}start.mjs\""
 
-if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ]]; then
+# The login refusal is an assertion in its own right, and the only one that proves no credential
+# was baked into the image. It runs whether or not a token is available, with the token withheld.
+check 'unauthenticated by design' 'Not logged in' run "$IMAGE" -p 'hello'
+
+# Fall back to the repo's .env for the live prompt, reading only that one key — see run.sh.
+token="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+if [[ -z "$token" && -f "$REPO/.env" ]]; then
+    token="$(grep -m1 -E '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN=' "$REPO/.env" | cut -d= -f2- | tr -d '"'\''' | xargs)"
+fi
+
+if [[ -n "${token}${ANTHROPIC_API_KEY:-}" ]]; then
     check 'answers a prompt' 'EXECUTOR_OK' \
-        run -e CLAUDE_CODE_OAUTH_TOKEN -e ANTHROPIC_API_KEY "$IMAGE" \
+        run -e CLAUDE_CODE_OAUTH_TOKEN="$token" -e ANTHROPIC_API_KEY "$IMAGE" \
         -p 'Reply with exactly EXECUTOR_OK and nothing else.'
 else
-    # Without credentials the login refusal is itself the assertion: the CLI started, read its
-    # config and got as far as auth, and nothing was baked into the image.
-    check 'unauthenticated by design' 'Not logged in' run "$IMAGE" -p 'hello'
-    echo 'note: no token in env — skipped the live prompt'
+    echo 'note: no token in the environment or .env — skipped the live prompt'
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

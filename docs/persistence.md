@@ -1,0 +1,82 @@
+# Persistence and incremental sync
+
+Read before: touching `server/src/store/*`, `stats-service.ts`, the sync watermark, or any
+migration under `server/migrations/`.
+
+PR data is **always** persisted; there is no other place for it to live. On boot `prime()` seeds
+the cache slot from the store, so a restart with a warm database serves real data on the first
+request rather than a 202.
+
+- **`store` is not optional, and there is no `if (!store)` branch anywhere.** The service used to
+  have a second, silent behaviour — an in-process cache that lost everything on restart — reachable
+  by forgetting `DATABASE_URL`. `StatsServiceDeps.store` is now required, `persistence.status` has
+  no `'off'`, and a process without a database refuses to boot instead of quietly forgetting.
+- **`memoryPrStore()` in `server/test/helpers.ts` is what keeps `npm test` offline.** Requiring a
+  store is a statement about *persistence being the only source*, not about PostgreSQL: it
+  implements `PrStore` in full and `harness()` defaults to it, so the offline suite needs no
+  container. Do not read the requirement as "tests need a database".
+- **Synthetic data reaches a database only through `npm run seed`, into a disposable one.** The
+  dangerous combination is still inexpressible, just relocated: it used to be prevented by deriving
+  `persistence` from `DATA_SOURCE`, and is now prevented by the seeding CLI's name allowlist plus
+  `loadConfig` refusing a disposable database whenever a token is set. Both halves matter — one
+  stops synthetic rows landing in `factory_dev`, the other stops real history landing somewhere
+  `npm run test:db` will truncate.
+- **`prime()` seeds with `last_sync_at`, never `now()`.** Seeding with `now()` reports
+  `ageSeconds: 0, stale: false` off a three-day-old database, `ensureFresh()` then declines to
+  sync, and the result is a permanently frozen dashboard that looks fresh.
+- **`cache.seed()` only fills an empty slot.** A seed arriving after a live fetch landed is older
+  by definition. And `ensureFresh()` returns early while `prime()` is in flight — otherwise the
+  first sync races the seed, wins, and burns a full walk for nothing.
+- **A persistence failure never propagates out of `produce()`.** It would set `lastFailureAt` and
+  freeze the whole PR pipeline for 30s over a database fault. Every store call goes through
+  `tryStore()`, which records `persistence.status = 'unavailable'` and returns null. Guarded by
+  `server/test/stats.persistence.test.ts` → "does not set the fetch cooldown".
+- **The watermark is a `sync_state` column, not `max(provider_updated_at)` over `pull_request`.**
+  That maximum advances on every successful upsert, *including part-way through a walk that then
+  died* — the next run would resume from the newest row it happened to write and skip everything
+  in between, silently and permanently. It advances only for a repo whose `completed[repo]` is
+  true.
+- **The incremental cutoff is `min(watermark − 5min, now − 14d, oldest open PR's updatedAt)`.**
+  Each term earns its place. The overlap covers GraphQL replica lag, without which an update is
+  missed forever and invisibly. The other two exist because `updatedAt` does **not** reliably bump
+  on a *child* change — a thread resolved, a label removed, a force push — and those feed
+  `headline.unresolvedThreadRatio`, the most prominent number on the page. Do not replace them
+  with a second query path.
+- **An incremental walk orders `UPDATED_AT DESC` and stops only after a whole page falls below the
+  cutoff.** `orderBy` is not a strict total order across equal timestamps, so a mid-page stop can
+  drop a sibling of the node that triggered it. **Do not** instead keep `CREATED_AT DESC` and stop
+  on `createdAt`: that never re-reads an old PR, so a thread resolved on a three-month-old one
+  never lands and the unresolved ratio freezes.
+- **A full reconciliation runs every 24h, or when `synced_epoch < SCHEMA_EPOCH`.** The epoch bump
+  is the important half: it is the only repair for a newly selected field leaving old rows null,
+  which is silently wrong for old PRs only. Bump `SCHEMA_EPOCH` when you add one.
+- **A truncated child list is upserted, never delete-and-replaced.** This is the single most
+  dangerous line in the write path. A degraded refetch of #149 returns 100 reviews with the total
+  still reading 397; replacing 397 rows with 100 corrupts the resolution ratio with no error
+  anywhere. The decision is **per connection**, because one PR can arrive with a complete commit
+  list and a truncated review list in the same fetch. A *complete* list is delete-and-replaced,
+  which is the only thing that ever makes a review deleted upstream stop being counted.
+  `pr-store.truncation.test.ts` also asserts `count(*) from pr_review !== review_count` for #149
+  on purpose, so nobody "fixes" the discrepancy by making the total a `count(*)` — that would
+  undercount by 297.
+- **`truncated` is recomputed on every write, never unioned.** A union leaves a stale caveat on the
+  page after a successful backfill has already filled the list in.
+- **`branch_commit` stores `message_headline`, not a precomputed `is_revert`.** Same reason
+  `metric_point` stores datapoints and not rollups: the classifier (`isRevertHeadline` in
+  `core/src/config.ts`) will change, and a verdict cannot be re-derived. It also lives in `core`
+  so the server and any slicing path share one definition.
+- **A base-branch rescan resumes an hour behind the newest stored commit.** `since` is inclusive
+  upstream, so the tip repeats and the primary key makes that a no-op. The overlap is not
+  paranoia: a commit date is not monotonic with history order, so a rebase can place a commit
+  behind its own parent and a zero-overlap resume genuinely skips it.
+- **`branch_history.covered_from` only ever moves backwards.** A later scan starting from a newer
+  bound has not lost the older commits, and moving it forward would make a range that *is* covered
+  report as unavailable.
+- **`ttlMs` is `syncTtlMs` when a store is present and `cacheTtlMs` otherwise**, and the history
+  loop now has a `MAX_HISTORY_PAGES` cap it was missing — a first scan of a busy monorepo could
+  page until the quota ran out.
+
+**Tradeoff worth knowing:** the SQL, the views and the migration runner have **no coverage in
+`npm test`**. That is the price of keeping the default suite offline and database-free; they are
+covered by `npm run test:db`, which needs a running container. The offline suite covers the same
+logic through `memoryPrStore()` in `server/test/helpers.ts`.

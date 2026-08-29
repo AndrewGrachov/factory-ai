@@ -107,43 +107,8 @@ expectation — ask first.**
 5. Build verification
 6. Performance implications
 
-## GitHub CLI
+## Tooling
 
-Use `gh` for all GitHub work — issues, PRs, checks, releases. Given a GitHub URL, fetch it with
-`gh` rather than guessing at the content.
-
-```bash
-gh pr view <N> --repo <owner/repo> --comments --json comments,reviews
-gh api repos/<owner/repo>/pulls/<N>/comments   # line-level review comments
-gh pr checks <N>
-gh pr diff <N>
-gh pr create --title "Title" --body "Description"
-```
-
-**Creating PRs:** after pushing a feature branch, create the PR without waiting to be asked. Title
-under 70 characters; body carries the summary, the notable decisions and a test plan.
-
-**Addressing review feedback:** read the review summary on the PR itself, not only the line
-comments — the summary is often where the substantive objection lives. After pushing fixes, reply
-to each comment describing *what changed and how*, not just the SHA.
-
-## Jira
-
-`acli` is installed in this image. Use it for all Jira work — reading, searching, creating,
-commenting. Do not use an Atlassian MCP server.
-
-```bash
-acli jira workitem search \
-    --jql "assignee = currentUser() AND status = 'In Progress' ORDER BY updated DESC" \
-    --fields "key,summary,status,issuetype,parent" --json
-
-acli jira workitem view <KEY> \
-    --fields "key,summary,description,status,issuetype,parent,comment" --json
-
-acli jira workitem comment <KEY> --body "..."
-```
-
-- Always read the latest comments — clarifications and changed requirements land there.
-- For a subtask (`issuetype.subtask === true`, or a non-null `parent`), fetch the parent too.
-- On an auth failure, stop and report it; the container needs `acli jira auth login` (see the
-  image README).
+GitHub and Jira are covered by the `github` and `jira` skills, which load on demand. Reach for
+them rather than improvising: `gh` for pull requests, reviews and checks; `acli` for work items.
+Do not use an Atlassian MCP server.

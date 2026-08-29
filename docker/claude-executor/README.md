@@ -11,9 +11,14 @@ checkout; it does not build or run this repo's application.
 | `claude-home/` | `/home/node/.claude` inside the image, via `CLAUDE_CONFIG_DIR` |
 | `claude-home/settings.json` | telemetry configuration |
 | `claude-home/CLAUDE.md` | the global instructions every session loads |
+| `claude-home/skills/` | `github` and `jira` — loaded on demand, not every session |
 
 `claude-home/` is the predefined configuration folder. Whatever you drop in it ships in the image —
-add `agents/`, `commands/`, `skills/` or `hooks/` and they need no Dockerfile change. It is a
+add `agents/`, `commands/` or `hooks/` and they need no Dockerfile change.
+
+Tool-specific guidance lives in `skills/`, not in `CLAUDE.md`: `CLAUDE.md` is read in full at the
+start of every session, while a skill costs only its description until something actually invokes
+it. Anything that applies to a subset of tasks belongs in a skill. It is a
 deliberate copy rather than a mount of the host's `~/.claude` — that directory holds
 `.credentials.json`, `history.jsonl` and per-project session state, none of which belong in an image
 layer or in git.

@@ -59,6 +59,12 @@ counterfeited or destroyed.
 docker compose up --build     # serves the built SPA and the API on 127.0.0.1:8080
 ```
 
+Compose reads the repo-root `.env` for `GITHUB_TOKEN` and the rest, and mounts a `workspaces`
+volume at `/workspaces`, which `ORG_WORKSPACE_ROOT` defaults to. So the stack also clones every repo
+in `ORG_REPOS` to `/workspaces/<ORG_ID>/<name>` on first boot — set `ORG_WORKSPACE_ROOT=` in `.env`
+if you would rather it did not. An existing checkout is never fetched or overwritten; see
+[docs/workspace.md](docs/workspace.md).
+
 ## Auth
 
 There is none. The dashboard has no login, and the localhost bind in `docker-compose.yml` is the

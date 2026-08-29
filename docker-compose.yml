@@ -5,10 +5,20 @@ services:
             dockerfile: docker/Dockerfile
         # There is no application-level auth, so the localhost bind is the access control.
         ports:
-            - '127.0.0.1:8080:8080'
+            - '127.0.0.1:8081:8080'
+        # Every ${VAR} below is substituted from the repo-root .env, which compose reads on its own
+        # — that is where GITHUB_TOKEN comes from, and .env is gitignored and dockerignored so it
+        # never enters an image layer.
+        #
+        # Deliberately NOT `env_file: .env`. That injects the whole file into the container, which
+        # would hand the process variables meant only for host scripts (DATABASE_URL among them,
+        # pointing at 127.0.0.1 — a different database from the one this file provisions) and would
+        # bypass the empty-defaulting below. The list here is the container's contract; .env only
+        # fills it in.
         environment:
             # Optional. Without it the dashboard never fetches and simply serves whatever is
-            # already in the database — which is a supported way to run, not a broken one.
+            # already in the database — which is a supported way to run, not a broken one. With a
+            # workspace attached it is also what clones private repos.
             GITHUB_TOKEN: ${GITHUB_TOKEN:-}
             GITHUB_OWNER: ${GITHUB_OWNER:-Leeloo-AI-RGA-OS}
             # Empty-defaulted, unlike most of this block, so a mounted factory.toml's
@@ -21,6 +31,14 @@ services:
             # Comma-separated; every repo listed is reported combined. This was GITHUB_REPOS, which
             # is now fatal rather than ignored.
             ORG_REPOS: ${ORG_REPOS:-}
+            # A literal default, unlike the three above, and the volume below is mounted to match:
+            # this is a path INSIDE the container, so a `workspace_root` in a mounted factory.toml
+            # is a host path that cannot exist here and clobbering it is the correct outcome. The
+            # ORG_* three are host-independent identifiers; this one is not.
+            #
+            # Consequence: `docker compose up` clones every repo in ORG_REPOS on first boot. Set it
+            # empty in .env to keep the stack from checking anything out.
+            ORG_WORKSPACE_ROOT: ${ORG_WORKSPACE_ROOT:-/workspaces}
             BASE_BRANCH: ${BASE_BRANCH:-dev}
             # The only cache floor. CACHE_TTL_SECONDS is gone and is now fatal if set.
             SYNC_TTL_SECONDS: ${SYNC_TTL_SECONDS:-60}
@@ -31,14 +49,23 @@ services:
             # the container at it would silently split history across two.
             DATABASE_URL: postgres://factory:factory@timescale:5432/factory_dev
             FACTORY_CONFIG: ${FACTORY_CONFIG:-}
-        # A factory.toml has to be mounted in, since it is gitignored and dockerignored and so
-        # never enters the image. Left commented because compose errors out when a mount source
-        # is missing, which would break `docker compose up` for anyone without the file.
-        # Note that most variables above are *real* values, not absent ones, so they win over the
-        # file — env-first stays the container's contract. The ORG_* three are the exception, and
-        # deliberately so: see the comment on them.
-        # volumes:
-        #     - ./factory.toml:/app/factory.toml:ro
+        volumes:
+            # The checkouts ORG_WORKSPACE_ROOT points at. Mounted unconditionally, unlike the
+            # factory.toml below: a named volume is created on demand, so there is no missing
+            # source to fail on, and without it every clone would be lost on the next `up`.
+            #
+            # A named volume rather than a bind mount because the container runs as `node`, which
+            # cannot usually write a host directory owned by someone else — and a clone that dies
+            # on permissions is a confusing first symptom. Reach the trees with
+            # `docker compose exec dashboard sh` or `docker cp`.
+            - workspaces:/workspaces
+            # A factory.toml has to be mounted in, since it is gitignored and dockerignored and so
+            # never enters the image. Left commented because compose errors out when a bind mount's
+            # source is missing, which would break `docker compose up` for anyone without the file.
+            # Note that most variables above are *real* values, not absent ones, so they win over
+            # the file — env-first stays the container's contract. The ORG_* three are the
+            # exception, and deliberately so: see the comment on them.
+            # - ./factory.toml:/app/factory.toml:ro
         depends_on:
             timescale:
                 condition: service_healthy
@@ -102,3 +129,6 @@ services:
 
 volumes:
     timescale-data:
+    # The organization's checkouts. Survives `docker compose down`; `down -v` discards them, and
+    # they are re-cloned on the next boot.
+    workspaces:

@@ -55,6 +55,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         databaseUrl: 'postgres://factory:factory@127.0.0.1:5432/factory_test',
         telemetryTtlMs: 30_000,
         repoNames: [TEST_REPO],
+        workspaceRoot: null,
         ...overrides,
     };
 }

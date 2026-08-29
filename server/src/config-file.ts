@@ -16,6 +16,7 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     'organization.id': { env: 'ORG_ID', kind: 'string' },
     'organization.name': { env: 'ORG_NAME', kind: 'string' },
     'organization.repos': { env: 'ORG_REPOS', kind: 'list' },
+    'organization.workspace_root': { env: 'ORG_WORKSPACE_ROOT', kind: 'string' },
     'github.token': { env: 'GITHUB_TOKEN', kind: 'string' },
     'github.owner': { env: 'GITHUB_OWNER', kind: 'string' },
     'github.base_branch': { env: 'BASE_BRANCH', kind: 'string' },

@@ -34,6 +34,18 @@ name = "Acme Inc"
 # so the sync TTL floor below is multiplied by the number of repos listed.
 repos = ["leeloo.ai"]
 
+# Where this organization's checkouts live: one clone per repo above, at
+# `<workspace_root>/<id>/<repo name>`. Cloned at boot, in the background — nothing the dashboard
+# renders reads them, so a failed clone is logged and the page still serves.
+#
+# Absolute, or starting with "~/"; a relative path is rejected rather than resolved, since it would
+# mean a different directory from the repo root, from server/, and in the container. Unset by
+# default, which means nothing is cloned at all.
+#
+# Only ever adds. An existing checkout is never fetched or overwritten — it may hold uncommitted
+# work — and removing a repo from the list above leaves its directory behind.
+# workspace_root = "~/.factory-ai/workspaces"
+
 [github]
 # Fine-grained PAT. OPTIONAL: without one the dashboard never fetches and serves whatever is
 # already in the database. That is how the browser check and a seeded demo run — see `npm run seed`.

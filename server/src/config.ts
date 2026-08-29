@@ -1,3 +1,4 @@
+import { isAbsolute, join } from 'node:path';
 import { DEFAULT_BOTS } from '@factory-ai/core';
 import type { TelemetrySource } from './telemetry/client.js';
 
@@ -46,6 +47,19 @@ export interface AppConfig {
      * source of truth that silently drops sessions the moment it drifts from `repos`.
      */
     readonly repoNames: readonly string[];
+    /**
+     * Where the organization's checkouts live: one clone per configured repo at
+     * `<workspaceRoot>/<orgId>/<name>`.
+     *
+     * `null` — the feature off — is the default, not a path under `$HOME`. A default would make an
+     * upgrade start cloning gigabytes for an operator who changed nothing, and would turn a
+     * no-network boot into a network boot; nothing on the read path needs a checkout, so there is
+     * no case where having one silently is better than not having one.
+     *
+     * Absolute, with `~` already expanded. See `workspaceRootOf` for why it is rejected rather than
+     * resolved.
+     */
+    readonly workspaceRoot: string | null;
 }
 
 // A telemetry read is a local query with no quota to protect, so this floor exists only to stop a
@@ -109,6 +123,64 @@ function int(raw: string | undefined, fallback: number, label: string): number {
     return value;
 }
 
+/**
+ * `~` expands against `env.HOME` rather than `os.homedir()`, and a relative path is rejected rather
+ * than resolved. Both keep `loadConfig` a pure function of its argument: `homedir()` reads the
+ * environment behind the validator's back, and a relative root means two different trees on one
+ * machine — `npm run dev -w server` has cwd `server/` while the container has `/app`. Resolving
+ * against the config file's directory instead would give one key two meanings depending on whether
+ * it arrived from the file or the environment, and `loadConfig` is not allowed to know a file
+ * exists at all.
+ */
+function workspaceRootOf(env: NodeJS.ProcessEnv): string | null {
+    const raw = env.ORG_WORKSPACE_ROOT?.trim();
+    if (!raw) return null;
+
+    let path = raw;
+    if (raw === '~' || raw.startsWith('~/')) {
+        const home = env.HOME?.trim();
+        if (!home) {
+            throw new Error(`ORG_WORKSPACE_ROOT is "${raw}" but HOME is not set, so "~" cannot be expanded`);
+        }
+        path = raw === '~' ? home : join(home, raw.slice(2));
+    }
+
+    if (!isAbsolute(path)) {
+        throw new Error(
+            `ORG_WORKSPACE_ROOT must be an absolute path (or start with "~/"), got "${raw}" — a relative one would mean a different directory when run from the repo root, from server/, and in the container`,
+        );
+    }
+    return path;
+}
+
+/**
+ * A checkout is `<root>/<orgId>/<name>`, so both halves have to survive being a bare path segment.
+ * `orgId` already does — ORG_ID_PATTERN forbids dots and slashes for exactly this — but a repo name
+ * has never been constrained, because until now it was only ever a string in an API path.
+ *
+ * Checked only when a workspace root is set: these names are legal everywhere else, and a
+ * deployment that never clones should not start failing to boot over one.
+ */
+function checkWorkspaceNames(repos: readonly Repo[]): void {
+    const seen = new Map<string, string>();
+    for (const repo of repos) {
+        const { name } = repo;
+        // A leading "-" is read by git as an option, not a path.
+        if (name === '.' || name === '..' || name.includes('/') || name.startsWith('-')) {
+            throw new Error(
+                `ORG_REPOS entry "${repo.owner}/${name}" cannot be checked out: with ORG_WORKSPACE_ROOT set, a repo name becomes a directory name`,
+            );
+        }
+        const first = seen.get(name);
+        if (first) {
+            throw new Error(
+                `ORG_REPOS lists "${first}/${name}" and "${repo.owner}/${name}", which share the checkout directory "${name}" — with ORG_WORKSPACE_ROOT set, one would overwrite the other`,
+            );
+        }
+        seen.set(name, repo.owner);
+    }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     // DATA_SOURCE selected between the live API and a replayed 203-PR payload. It is gone, and
     // fatal rather than ignored for the same reason GITHUB_REPOS is: it used to change what the
@@ -164,6 +236,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         }
         return { owner: entryOwner, name: entryName };
     });
+
+    const workspaceRoot = workspaceRootOf(env);
+    if (workspaceRoot) checkWorkspaceNames(repos);
 
     // CACHE_TTL_SECONDS floored the slot at 300s per repo because every refresh was a full walk.
     // With history always persisted, the ordinary refresh is incremental and SYNC_TTL_SECONDS is
@@ -242,5 +317,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         databaseUrl,
         telemetryTtlMs: telemetryTtlSeconds * 1000,
         repoNames: Object.freeze(repos.map((repo) => `${repo.owner}/${repo.name}`)),
+        workspaceRoot,
     });
 }

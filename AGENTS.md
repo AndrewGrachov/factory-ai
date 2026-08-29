@@ -14,6 +14,7 @@ of decisions that look like cruft and are not, and most are guarded by a test th
 | Anything named `org_id`, `005_organizations.sql`, the org selector | [docs/organizations.md](docs/organizations.md) |
 | `attribute()` keys, `004_pull_requests.sql` keys, per-repo rendering | [docs/repos.md](docs/repos.md) |
 | `config.ts`, `config-file.ts`, compose env blocks, `factory.toml` | [docs/configuration.md](docs/configuration.md) |
+| `server/src/workspace/*`, `ORG_WORKSPACE_ROOT`, the `git` install in the runtime image | [docs/workspace.md](docs/workspace.md) |
 | `server/src/telemetry/*`, OTLP routes, SQL views, collector config | [docs/telemetry.md](docs/telemetry.md) |
 | `filterPrs()`, `parseRange`, `revertForRange()`, the range selector, charts | [docs/date-range.md](docs/date-range.md) |
 | `server/src/store/*`, `stats-service.ts`, the sync watermark, migrations | [docs/persistence.md](docs/persistence.md) |

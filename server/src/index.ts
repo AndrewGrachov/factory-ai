@@ -9,6 +9,7 @@ import { createGitHubClient } from './github/client.js';
 import { envTokenProvider } from './github/token.js';
 import { createStatsService } from './stats-service.js';
 import { createFixtureTelemetryClient, createNullTelemetryClient } from './telemetry/fixture-client.js';
+import { ensureWorkspace } from './workspace/reconcile.js';
 
 // `env` is the file merged under process.env. It has to reach envTokenProvider, which is the one
 // place outside config.ts that reads the PAT and would otherwise ignore the file's copy of it.
@@ -67,5 +68,21 @@ service.prime().catch((e: Error) => console.error(`[persist] prime failed: ${e.m
 
 // Warm the cache at boot so the first visitor does not eat the cold fetch.
 service.ensureFresh();
+
+// Also fired, not awaited: a clone is minutes of network for something no route reads, so blocking
+// listen() on it would make the dashboard unavailable for a feature it does not use.
+//
+// The token is read off the merged record directly rather than through envTokenProvider, which
+// throws when there is none. Here that is not an error: without a token the public repos still
+// clone and the private ones report a named failure.
+if (config.workspaceRoot) {
+    ensureWorkspace({
+        root: config.workspaceRoot,
+        orgId: config.orgId,
+        repos: config.repos,
+        token: env.GITHUB_TOKEN,
+        log: (m) => console.log(`[workspace] ${m}`),
+    }).catch((e: Error) => console.error(`[workspace] ${e.message}`));
+}
 
 await app.listen({ port: config.port, host: config.host });

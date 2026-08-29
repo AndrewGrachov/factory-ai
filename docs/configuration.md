@@ -55,5 +55,9 @@ record, so env wins by merge order.
 - **Integers must be unquoted and strings must be strings** (`ttl_seconds = "900"` is rejected),
   so the file stays honestly typed instead of drifting into env-style stringly values. A `bots`
   entry containing a comma is rejected because the env form is comma-separated.
+- **`ORG_WORKSPACE_ROOT` is unset by default, must be absolute, and expands `~` against `env.HOME`
+  rather than `os.homedir()`** — that last one is what keeps `loadConfig` a pure function of its
+  argument. See [workspace.md](workspace.md) for the rest, including why a relative path is rejected
+  rather than resolved.
 - **Never log the merged record.** It holds the PAT. Log key names, provenance and the resolved
   path only.

@@ -9,6 +9,7 @@ checkout; it does not build or run this repo's application.
 | --- | --- |
 | `Dockerfile` | the image — Node 24 (debian), git, `@anthropic-ai/claude-code`, `acli`, the `context-mode` plugin |
 | `entrypoint.sh` | `/usr/local/bin/claude-executor` — the `ENTRYPOINT` |
+| `test.sh` | builds the image and exercises it against this repo — not shipped inside it |
 | `claude-home/` | `/home/node/.claude` inside the image, via `CLAUDE_CONFIG_DIR` |
 | `claude-home/settings.json` | telemetry configuration |
 | `claude-home/CLAUDE.md` | the global instructions every session loads |
@@ -59,6 +60,21 @@ docker build --build-arg CLAUDE_CODE_VERSION=2.0.0 -t claude-executor docker/cla
 ```
 
 The build context is this directory, not the repo root.
+
+## Test
+
+```bash
+docker/claude-executor/test.sh
+```
+
+Builds the image as `claude-executor-test` and runs eleven checks against this repo as the mounted
+checkout: the CLI, `acli`, the plugin (including a real MCP stdio handshake, since installed is not
+the same as working), `CLAUDE.md`, the skills, the three `$WORKDIR` behaviours, and git reading the
+mount. Prints `ok`/`FAIL` per check and exits non-zero if any fail.
+
+Offline — no token and no quota. It ends by asserting the CLI reaches the login prompt, which is
+the assertion that no credential is baked in. Export `CLAUDE_CODE_OAUTH_TOKEN` or
+`ANTHROPIC_API_KEY` and it runs one live prompt instead.
 
 ## Run
 

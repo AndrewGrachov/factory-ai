@@ -7,14 +7,41 @@ checkout; it does not build or run this repo's application.
 
 | Path | Becomes |
 | --- | --- |
-| `Dockerfile` | the image — Node 24 (debian slim), git, `@anthropic-ai/claude-code` |
+| `Dockerfile` | the image — Node 24 (debian), git, `@anthropic-ai/claude-code`, `acli`, the `context-mode` plugin |
 | `claude-home/` | `/home/node/.claude` inside the image, via `CLAUDE_CONFIG_DIR` |
+| `claude-home/settings.json` | telemetry configuration |
+| `claude-home/CLAUDE.md` | the global instructions every session loads |
 
-`claude-home/` is the predefined configuration folder. Whatever you drop in it ships in the image:
-`settings.json` today, plus `CLAUDE.md`, `agents/`, `commands/`, `skills/` or `hooks/` if you add
-them. It is a deliberate copy rather than a mount of the host's `~/.claude` — that directory holds
+`claude-home/` is the predefined configuration folder. Whatever you drop in it ships in the image —
+add `agents/`, `commands/`, `skills/` or `hooks/` and they need no Dockerfile change. It is a
+deliberate copy rather than a mount of the host's `~/.claude` — that directory holds
 `.credentials.json`, `history.jsonl` and per-project session state, none of which belong in an image
 layer or in git.
+
+`CLAUDE.md` is deliberately vendor-neutral: this repo is public, so it carries no site names,
+ticket prefixes or internal repo references. It also documents only tooling the image actually
+has — instructions for an absent binary cost tokens every session and end in
+`command not found`. To run with your own instead, mount over it:
+`-v "$HOME/.claude/CLAUDE.md:/home/node/.claude/CLAUDE.md:ro"`.
+
+## Preinstalled tooling
+
+- **`context-mode` plugin**, installed at build time from `mksglu/context-mode` and enabled. Its
+  MCP server is plain `node`, so nothing further is needed at run time. Because
+  `claude plugin install` writes `extraKnownMarketplaces` and `enabledPlugins` into `settings.json`
+  itself, those keys are deliberately absent from the committed file.
+- **`acli`** (Atlassian CLI) at `/usr/local/bin/acli`, matching `CLAUDE.md`'s instruction to drive
+  Jira through it rather than through the Atlassian MCP server. Unauthenticated on a fresh
+  container — it reads credentials from `~/.config/acli`, so either log in once per container:
+
+  ```bash
+  docker run --rm -it -e JIRA_API_TOKEN claude-executor \
+      sh -c 'echo "$JIRA_API_TOKEN" | acli jira auth login \
+          --site your-site.atlassian.net --email you@example.com --token'
+  ```
+
+  or mount an existing profile read-only with `-v "$HOME/.config/acli:/home/node/.config/acli:ro"`.
+  Note that `ENTRYPOINT` is `claude`, hence the explicit `sh -c` above.
 
 ## Build
 

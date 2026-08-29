@@ -23,7 +23,10 @@ const LIST_LIMIT_MAX = 200;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const STATUSES: readonly JobStatus[] = ['queued', 'running', 'succeeded', 'failed', 'dead'];
+/** Far past the `cse_` tokens seen in practice, and short enough that it cannot be an essay. */
+const REMOTE_SESSION_LIMIT = 256;
+
+const STATUSES: readonly JobStatus[] = ['queued', 'running', 'standby', 'succeeded', 'failed', 'dead'];
 
 const body = (raw: unknown): Record<string, unknown> =>
     raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -124,6 +127,93 @@ export const jobRoutes =
                 return reply.code(409).send({ error: 'Lease lost', code: 'LEASE_LOST' });
             }
             return reply.code(200).send({ leaseExpiresAt: beat.value.leaseExpiresAt });
+        });
+
+        // Reported separately from the completion, and not folded into the claim: the driver mints
+        // the session id at spawn time, and a run that is still going is exactly when a reader wants
+        // to open it.
+        app.post('/api/jobs/:id/session', { bodyLimit: 4096 }, async (request, reply) => {
+            const id = (request.params as { id: string }).id;
+            if (!UUID.test(id)) return bad(reply, 'BAD_ID', 'id must be a uuid');
+
+            const { leaseToken, sessionId, remoteSessionId } = body(request.body);
+            if (typeof leaseToken !== 'string' || !UUID.test(leaseToken)) {
+                return bad(reply, 'BAD_TOKEN', 'leaseToken must be a uuid');
+            }
+            if (typeof sessionId !== 'string' || !UUID.test(sessionId)) {
+                return bad(reply, 'BAD_SESSION_ID', 'sessionId must be a uuid');
+            }
+            // Not a uuid, and not checked against a shape: it is an opaque token minted elsewhere
+            // (`cse_…` today), and pinning its format here would break on the day it changes.
+            if (
+                remoteSessionId !== undefined &&
+                remoteSessionId !== null &&
+                (typeof remoteSessionId !== 'string' ||
+                    !remoteSessionId.trim() ||
+                    remoteSessionId.length > REMOTE_SESSION_LIMIT)
+            ) {
+                return bad(
+                    reply,
+                    'BAD_REMOTE_SESSION_ID',
+                    `remoteSessionId must be a non-empty string of at most ${REMOTE_SESSION_LIMIT} characters`,
+                );
+            }
+
+            const result = await guard(reply, (e) => request.log.error({ err: e }, 'job session failed'), () =>
+                store.session(id, leaseToken, sessionId, (remoteSessionId as string | undefined) ?? null),
+            );
+            if (!result.ok) return reply;
+            if (result.value === 'missing') {
+                return reply.code(404).send({ error: 'No such job', code: 'NOT_FOUND' });
+            }
+            if (result.value === 'lost') {
+                return reply.code(409).send({ error: 'Lease lost', code: 'LEASE_LOST' });
+            }
+            return reply.code(200).send({ id, sessionId, remoteSessionId: remoteSessionId ?? null });
+        });
+
+        // Parking a job, not finishing it. Separate from complete because there is no outcome yet:
+        // an exit code here would have to be invented, and inventing one makes a parked job
+        // indistinguishable from a run that ended.
+        app.post('/api/jobs/:id/suspend', { bodyLimit: 4096 }, async (request, reply) => {
+            const id = (request.params as { id: string }).id;
+            if (!UUID.test(id)) return bad(reply, 'BAD_ID', 'id must be a uuid');
+
+            const { leaseToken } = body(request.body);
+            if (typeof leaseToken !== 'string' || !UUID.test(leaseToken)) {
+                return bad(reply, 'BAD_TOKEN', 'leaseToken must be a uuid');
+            }
+
+            const result = await guard(reply, (e) => request.log.error({ err: e }, 'job suspend failed'), () =>
+                store.suspend(id, leaseToken),
+            );
+            if (!result.ok) return reply;
+            if (result.value === 'missing') {
+                return reply.code(404).send({ error: 'No such job', code: 'NOT_FOUND' });
+            }
+            if (result.value === 'lost') {
+                return reply.code(409).send({ error: 'Lease lost', code: 'LEASE_LOST' });
+            }
+            return reply.code(200).send({ id, status: 'standby' });
+        });
+
+        // No lease token, because nobody holds a parked job. That is what makes this callable by a
+        // person rather than only by the worker that parked it.
+        app.post('/api/jobs/:id/resume', { bodyLimit: 4096 }, async (request, reply) => {
+            const id = (request.params as { id: string }).id;
+            if (!UUID.test(id)) return bad(reply, 'BAD_ID', 'id must be a uuid');
+
+            const result = await guard(reply, (e) => request.log.error({ err: e }, 'job resume failed'), () =>
+                store.resume(id),
+            );
+            if (!result.ok) return reply;
+            if (result.value === 'missing') {
+                return reply.code(404).send({ error: 'No such job', code: 'NOT_FOUND' });
+            }
+            if (result.value === 'conflict') {
+                return reply.code(409).send({ error: 'Job is not on standby', code: 'NOT_STANDBY' });
+            }
+            return reply.code(200).send({ id, status: 'queued' });
         });
 
         app.post('/api/jobs/:id/complete', { bodyLimit: BODY_LIMIT }, async (request, reply) => {

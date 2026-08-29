@@ -17,6 +17,8 @@ const TOKEN = '22222222-2222-4222-8222-222222222222';
 interface StoreStub extends JobStore {
     commands: string[];
     completed: { id: string; output: string | null }[];
+    sessions: { id: string; sessionId: string; remoteSessionId: string | null }[];
+    suspended: string[];
 }
 
 /**
@@ -26,7 +28,13 @@ interface StoreStub extends JobStore {
  * test-db/job-store.test.ts.
  */
 function stubStore(
-    options: { fail?: boolean; claim?: Claim | null; verdict?: LeaseResult; job?: Job | null } = {},
+    options: {
+        fail?: boolean;
+        claim?: Claim | null;
+        verdict?: LeaseResult;
+        job?: Job | null;
+        resume?: 'ok' | 'missing' | 'conflict';
+    } = {},
 ): StoreStub {
     const boom = () => {
         if (options.fail) throw new Error('database is down');
@@ -34,6 +42,17 @@ function stubStore(
     const stub: StoreStub = {
         commands: [],
         completed: [],
+        sessions: [],
+        suspended: [],
+        async suspend(id) {
+            boom();
+            stub.suspended.push(id);
+            return options.verdict ?? 'ok';
+        },
+        async resume() {
+            boom();
+            return options.resume ?? 'ok';
+        },
         async create(command) {
             boom();
             stub.commands.push(command);
@@ -47,6 +66,11 @@ function stubStore(
             boom();
             const result = options.verdict ?? 'ok';
             return { result, leaseExpiresAt: result === 'ok' ? '2026-08-21T12:05:00.000Z' : null };
+        },
+        async session(id, _token, sessionId, remoteSessionId) {
+            boom();
+            stub.sessions.push({ id, sessionId, remoteSessionId });
+            return options.verdict ?? 'ok';
         },
         async complete(id, _token, { output }) {
             boom();
@@ -121,6 +145,7 @@ describe('POST /api/jobs/claim', () => {
         attempts: 1,
         leaseToken: TOKEN,
         leaseExpiresAt: '2026-08-21T12:05:00.000Z',
+        resumeSessionId: null,
     };
 
     it('hands out the job with its lease token', async () => {
@@ -193,6 +218,126 @@ describe('POST /api/jobs/:id/heartbeat', () => {
     });
 });
 
+describe('POST /api/jobs/:id/session', () => {
+    const SESSION = '33333333-3333-4333-8333-333333333333';
+
+    it('records the session the attempt is running as', async () => {
+        const store = stubStore({ verdict: 'ok' });
+        const instance = await harnessWith(store);
+
+        const response = await post(instance, `/api/jobs/${ID}/session`, {
+            leaseToken: TOKEN,
+            sessionId: SESSION,
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(store.sessions).toEqual([{ id: ID, sessionId: SESSION, remoteSessionId: null }]);
+    });
+
+    // The second report of an attempt. The remote id is assigned by Anthropic's backend when the
+    // bridge connects, so it can only ever arrive after the run has started.
+    it('records the remote session id when the bridge has reported one', async () => {
+        const store = stubStore({ verdict: 'ok' });
+        const instance = await harnessWith(store);
+
+        const response = await post(instance, `/api/jobs/${ID}/session`, {
+            leaseToken: TOKEN,
+            sessionId: SESSION,
+            remoteSessionId: 'cse_015tb2nHhHNrBuL7ZDhn9Wx5',
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(store.sessions[0]?.remoteSessionId).toBe('cse_015tb2nHhHNrBuL7ZDhn9Wx5');
+    });
+
+    // Deliberately not shape-checked: it is an opaque token minted elsewhere, and pinning `cse_`
+    // here would break on the day it changes.
+    it('takes any reasonable string as the remote id, but not junk', async () => {
+        const instance = await harnessWith(stubStore());
+        const send = (remoteSessionId: unknown) =>
+            post(instance, `/api/jobs/${ID}/session`, { leaseToken: TOKEN, sessionId: SESSION, remoteSessionId });
+
+        expect((await send('anything-at-all')).statusCode).toBe(200);
+        expect((await send('   ')).statusCode).toBe(400);
+        expect((await send(42)).statusCode).toBe(400);
+        expect((await send('x'.repeat(257))).statusCode).toBe(400);
+    });
+
+    // Same rule as every other worker write: a superseded worker must not relabel the run that
+    // replaced it.
+    it('rejects a report from a worker whose lease was reclaimed', async () => {
+        const instance = await harnessWith(stubStore({ verdict: 'lost' }));
+        const response = await post(instance, `/api/jobs/${ID}/session`, {
+            leaseToken: TOKEN,
+            sessionId: SESSION,
+        });
+        expect(response.statusCode).toBe(409);
+    });
+
+    it.each([
+        ['a missing session id', { leaseToken: TOKEN }, 'BAD_SESSION_ID'],
+        ['a session id that is not a uuid', { leaseToken: TOKEN, sessionId: 'nope' }, 'BAD_SESSION_ID'],
+        ['a malformed lease token', { leaseToken: 'nope', sessionId: SESSION }, 'BAD_TOKEN'],
+    ])('refuses %s', async (_label, payload, code) => {
+        const instance = await harnessWith(stubStore());
+        const response = await post(instance, `/api/jobs/${ID}/session`, payload);
+        expect(response.statusCode).toBe(400);
+        expect(response.json().code).toBe(code);
+    });
+});
+
+describe('parking and resuming', () => {
+    it('parks a running job', async () => {
+        const store = stubStore({ verdict: 'ok' });
+        const instance = await harnessWith(store);
+
+        const response = await post(instance, `/api/jobs/${ID}/suspend`, { leaseToken: TOKEN });
+
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({ id: ID, status: 'standby' });
+        expect(store.suspended).toEqual([ID]);
+    });
+
+    it('refuses a park from a worker whose lease was reclaimed', async () => {
+        const instance = await harnessWith(stubStore({ verdict: 'lost' }));
+        const response = await post(instance, `/api/jobs/${ID}/suspend`, { leaseToken: TOKEN });
+        expect(response.statusCode).toBe(409);
+    });
+
+    it('puts a parked job back in the queue', async () => {
+        const instance = await harnessWith(stubStore({ resume: 'ok' }));
+        const response = await post(instance, `/api/jobs/${ID}/resume`, {});
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({ id: ID, status: 'queued' });
+    });
+
+    // Resuming something that is running or finished is a caller mistake, and it has to read
+    // differently from a job that is not there at all.
+    it('separates a job that is not parked from one that does not exist', async () => {
+        const conflict = await harnessWith(stubStore({ resume: 'conflict' }));
+        const first = await post(conflict, `/api/jobs/${ID}/resume`, {});
+        expect(first.statusCode).toBe(409);
+        expect(first.json().code).toBe('NOT_STANDBY');
+
+        await conflict.close();
+        const absent = await harnessWith(stubStore({ resume: 'missing' }));
+        expect((await post(absent, `/api/jobs/${ID}/resume`, {})).statusCode).toBe(404);
+    });
+
+    // No lease token on resume: nobody holds a parked job, which is what makes it resumable by a
+    // person rather than only by the worker that parked it.
+    it('takes no lease token to resume', async () => {
+        const instance = await harnessWith(stubStore({ resume: 'ok' }));
+        expect((await post(instance, `/api/jobs/${ID}/resume`, {})).statusCode).toBe(200);
+    });
+
+    it('refuses a malformed id on either', async () => {
+        const instance = await harnessWith(stubStore());
+        expect((await post(instance, '/api/jobs/nope/suspend', { leaseToken: TOKEN })).statusCode).toBe(400);
+        expect((await post(instance, '/api/jobs/nope/resume', {})).statusCode).toBe(400);
+    });
+});
+
 describe('POST /api/jobs/:id/complete', () => {
     const done = { leaseToken: TOKEN, status: 'succeeded', exitCode: 0, output: 'hello' };
 
@@ -240,6 +385,8 @@ describe('GET /api/jobs', () => {
         attempts: 1,
         maxAttempts: 3,
         claimedBy: 'w1',
+        sessionId: '33333333-3333-4333-8333-333333333333',
+        remoteSessionId: 'cse_015tb2nHhHNrBuL7ZDhn9Wx5',
         exitCode: 0,
         output: 'hello',
         createdAt: '2026-08-21T12:00:00.000Z',

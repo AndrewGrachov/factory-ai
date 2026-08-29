@@ -1,6 +1,6 @@
 import type { Sql } from 'postgres';
 
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'dead';
+export type JobStatus = 'queued' | 'running' | 'standby' | 'succeeded' | 'failed' | 'dead';
 /** What a worker may report. 'dead' is the board's verdict, never a worker's. */
 export type JobOutcome = 'succeeded' | 'failed';
 
@@ -11,6 +11,13 @@ export interface Job {
     attempts: number;
     maxAttempts: number;
     claimedBy: string | null;
+    /** The agent session this attempt runs as, once its driver has reported it. */
+    sessionId: string | null;
+    /**
+     * The Remote Control session claude.ai addresses this run by (`cse_…`), once the bridge has
+     * connected and the driver has read it back. Null for every headless job.
+     */
+    remoteSessionId: string | null;
     exitCode: number | null;
     output: string | null;
     createdAt: string;
@@ -25,6 +32,12 @@ export interface Claim {
     attempts: number;
     leaseToken: string;
     leaseExpiresAt: string;
+    /**
+     * Set only when this claim is picking a parked job back up, and it is the whole resume protocol:
+     * the worker restores that session instead of starting a new one, and the command is not
+     * re-delivered — it was delivered on the first run and is in the transcript.
+     */
+    resumeSessionId: string | null;
 }
 
 /**
@@ -41,6 +54,30 @@ export interface JobStore {
     /** The oldest claimable job, or null when there is none. Never blocks on a live lease. */
     claim(worker: string, leaseSeconds: number): Promise<Claim | null>;
     heartbeat(id: string, leaseToken: string, leaseSeconds: number): Promise<{ result: LeaseResult; leaseExpiresAt: string | null }>;
+    /**
+     * Records the agent session the running attempt is using, so a reader can open it. Lease-guarded
+     * like every other worker write: a superseded worker must not relabel the run that replaced it.
+     *
+     * Called more than once per attempt: the local id is known before the container starts, and the
+     * remote one only after the bridge connects. A null `remoteSessionId` therefore leaves whatever
+     * is already stored alone rather than clearing it.
+     */
+    session(
+        id: string,
+        leaseToken: string,
+        sessionId: string,
+        remoteSessionId: string | null,
+    ): Promise<LeaseResult>;
+    /**
+     * Parks a running job: the container is gone, but the job is not finished and its session is
+     * kept so it can be restored. Lease-guarded, like every other worker write.
+     */
+    suspend(id: string, leaseToken: string): Promise<LeaseResult>;
+    /**
+     * Puts a parked job back in the queue. Not lease-guarded — nobody holds a standby job, which is
+     * precisely what makes it resumable by a request from outside.
+     */
+    resume(id: string): Promise<'ok' | 'missing' | 'conflict'>;
     complete(
         id: string,
         leaseToken: string,
@@ -58,6 +95,8 @@ interface JobRow {
     attempts: number;
     max_attempts: number;
     claimed_by: string | null;
+    session_id: string | null;
+    remote_session_id: string | null;
     exit_code: number | null;
     output?: string | null;
     created_at: Date;
@@ -74,6 +113,8 @@ const toJob = (row: JobRow): Job => ({
     attempts: row.attempts,
     maxAttempts: row.max_attempts,
     claimedBy: row.claimed_by,
+    sessionId: row.session_id,
+    remoteSessionId: row.remote_session_id,
     exitCode: row.exit_code,
     output: row.output ?? null,
     createdAt: row.created_at.toISOString(),
@@ -123,6 +164,7 @@ export function createJobStore({
                     attempts: number;
                     lease_token: string;
                     lease_expires_at: Date;
+                    session_id: string | null;
                 }[]
             >`
                 update job set
@@ -133,6 +175,14 @@ export function createJobStore({
                     -- Unconditional, not coalesce(started_at, now()): this must describe the
                     -- attempt that is about to run, or every duration is measured from attempt 1.
                     started_at       = now(),
+                    -- Kept only when the job was parked and put back in the queue, which is the one
+                    -- case where the previous session IS this attempt. The status read here is the
+                    -- row's value BEFORE this update, so 'running' means a lease that expired:
+                    -- that attempt's session is not this one, and leaving it would show a link to a
+                    -- run whose output was thrown away.
+                    session_id       = case when status = 'queued' then session_id else null end,
+                    remote_session_id =
+                        case when status = 'queued' then remote_session_id else null end,
                     lease_expires_at = now() + make_interval(secs => ${leaseSeconds}::int)
                 where org_id = ${orgId} and id = (
                     select id from job
@@ -147,7 +197,7 @@ export function createJobStore({
                     -- because this subquery is holding the row lock.
                     for update skip locked
                 )
-                returning id, command, attempts, lease_token, lease_expires_at
+                returning id, command, attempts, lease_token, lease_expires_at, session_id
             `;
 
             const row = rows[0];
@@ -158,6 +208,8 @@ export function createJobStore({
                 attempts: row.attempts,
                 leaseToken: row.lease_token,
                 leaseExpiresAt: row.lease_expires_at.toISOString(),
+                // Survived the case above, so this claim is a resume.
+                resumeSessionId: row.session_id,
             };
         },
 
@@ -173,6 +225,58 @@ export function createJobStore({
             const row = rows[0];
             if (row) return { result: 'ok', leaseExpiresAt: row.lease_expires_at.toISOString() };
             return { result: (await exists(sql, orgId, id)) ? 'lost' : 'missing', leaseExpiresAt: null };
+        },
+
+        async session(id, leaseToken, sessionId, remoteSessionId) {
+            await gate();
+            const rows = await sql<{ id: string }[]>`
+                update job set
+                    session_id = ${sessionId},
+                    -- coalesce, not assignment: the first report of an attempt carries no remote id
+                    -- yet, and it must not wipe one a later report already stored.
+                    remote_session_id = coalesce(${remoteSessionId}, remote_session_id)
+                where org_id = ${orgId} and id = ${id}
+                  and status = 'running' and lease_token = ${leaseToken}
+                returning id
+            `;
+            if (rows[0]) return 'ok';
+            return (await exists(sql, orgId, id)) ? 'lost' : 'missing';
+        },
+
+        async suspend(id, leaseToken) {
+            await gate();
+            const rows = await sql<{ id: string }[]>`
+                update job set
+                    status           = 'standby',
+                    lease_token      = null,
+                    -- Expired on the way in, exactly as insert does it. Standby is not claimable,
+                    -- so this changes nothing until the job is resumed — and then it is the
+                    -- difference between the next poll picking it up and it sitting in 'queued'
+                    -- until the lease the parked worker was holding finally runs out.
+                    lease_expires_at = now(),
+                    -- Hands back the attempt the claim took. A suspend is not a failed try, so
+                    -- parking a job a hundred times must never exhaust max_attempts — while a run
+                    -- that keeps killing its worker still does.
+                    attempts         = greatest(attempts - 1, 0)
+                where org_id = ${orgId} and id = ${id}
+                  and status = 'running' and lease_token = ${leaseToken}
+                returning id
+            `;
+            if (rows[0]) return 'ok';
+            return (await exists(sql, orgId, id)) ? 'lost' : 'missing';
+        },
+
+        async resume(id) {
+            await gate();
+            const rows = await sql<{ id: string }[]>`
+                update job set status = 'queued'
+                where org_id = ${orgId} and id = ${id} and status = 'standby'
+                returning id
+            `;
+            if (rows[0]) return 'ok';
+            // A job that exists but is not parked is a different answer from one that does not:
+            // resuming a finished job is a caller mistake, not a missing row.
+            return (await exists(sql, orgId, id)) ? 'conflict' : 'missing';
         },
 
         async complete(id, leaseToken, { status, exitCode, output }) {
@@ -197,8 +301,8 @@ export function createJobStore({
         async get(id) {
             await gate();
             const rows = await sql<JobRow[]>`
-                select id, command, status, attempts, max_attempts, claimed_by, exit_code, output,
-                       created_at, started_at, finished_at
+                select id, command, status, attempts, max_attempts, claimed_by, session_id,
+                       remote_session_id, exit_code, output, created_at, started_at, finished_at
                 from job where org_id = ${orgId} and id = ${id}
             `;
             const row = rows[0];
@@ -208,8 +312,8 @@ export function createJobStore({
         async list({ status, limit }) {
             await gate();
             const rows = await sql<JobRow[]>`
-                select id, command, status, attempts, max_attempts, claimed_by, exit_code,
-                       created_at, started_at, finished_at
+                select id, command, status, attempts, max_attempts, claimed_by, session_id,
+                       remote_session_id, exit_code, created_at, started_at, finished_at
                 from job
                 where org_id = ${orgId} ${status ? sql`and status = ${status}` : sql``}
                 order by created_at desc, id

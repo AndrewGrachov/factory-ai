@@ -31,6 +31,9 @@ const ORG = 'test-org';
 const OTHER_ORG = 'other-org';
 /** A well-formed uuid, only ever used where the job or the lease is expected not to exist. */
 const ABSENT = '00000000-0000-4000-8000-000000000000';
+const SESSION = '33333333-3333-4333-8333-333333333333';
+/** Shaped like a real one: opaque, prefixed, and not a uuid. */
+const REMOTE = 'cse_015tb2nHhHNrBuL7ZDhn9Wx5';
 
 beforeAll(async () => {
     if (!enabled) return;
@@ -170,6 +173,144 @@ describe.skipIf(!enabled)('job store', () => {
             output: null,
         });
         expect(result).toBe('missing');
+    });
+
+    it('records the session an attempt is running as', async () => {
+        const { id } = await store.create('echo hi');
+        const claim = await store.claim('w1', 300);
+
+        expect(await store.session(id, claim!.leaseToken, SESSION, null)).toBe('ok');
+        expect(await store.get(id)).toMatchObject({ sessionId: SESSION });
+    });
+
+    // Two reports per attempt: the local id at spawn, the remote one once the bridge connects. The
+    // second must not be able to wipe the first, and the first must not wipe a remote id that a
+    // later report already stored.
+    it('adds the remote session id without clearing what is already there', async () => {
+        const { id } = await store.create('drive me');
+        const claim = await store.claim('w1', 300);
+
+        await store.session(id, claim!.leaseToken, SESSION, null);
+        await store.session(id, claim!.leaseToken, SESSION, REMOTE);
+        await store.session(id, claim!.leaseToken, SESSION, null);
+
+        expect(await store.get(id)).toMatchObject({ sessionId: SESSION, remoteSessionId: REMOTE });
+    });
+
+    it('drops the remote session when the job is claimed again', async () => {
+        const { id } = await store.create('drive me');
+        const first = await store.claim('w1', 300);
+        await store.session(id, first!.leaseToken, SESSION, REMOTE);
+        await expireLease(id);
+
+        await store.claim('w2', 300);
+
+        expect((await store.get(id))?.remoteSessionId).toBeNull();
+    });
+
+    it('refuses a session report from a worker whose lease was reclaimed', async () => {
+        const { id } = await store.create('echo hi');
+        const stale = await store.claim('w1', 300);
+        await expireLease(id);
+        await store.claim('w2', 300);
+
+        expect(await store.session(id, stale!.leaseToken, SESSION, null)).toBe('lost');
+        expect(await store.session(ABSENT, stale!.leaseToken, SESSION, null)).toBe('missing');
+    });
+
+    // The attempt that died ran a different session, and showing its link next to this attempt's
+    // output would point a reader at work that was thrown away.
+    it('clears the session when the job is claimed again', async () => {
+        const { id } = await store.create('echo hi');
+        const first = await store.claim('w1', 300);
+        await store.session(id, first!.leaseToken, SESSION, null);
+        await expireLease(id);
+
+        await store.claim('w2', 300);
+
+        expect((await store.get(id))?.sessionId).toBeNull();
+    });
+
+    it('parks a running job without finishing it, keeping its session', async () => {
+        const { id } = await store.create('drive me');
+        const claim = await store.claim('w1', 300);
+        await store.session(id, claim!.leaseToken, SESSION, null);
+
+        expect(await store.suspend(id, claim!.leaseToken)).toBe('ok');
+
+        expect(await store.get(id)).toMatchObject({ status: 'standby', sessionId: SESSION });
+        expect((await store.get(id))?.finishedAt).toBeNull();
+    });
+
+    // A parked job must not be picked up by the next idle poll — that would resume it instantly,
+    // which is the opposite of parking it. The partial claim index is what makes this true.
+    it('does not hand out a parked job', async () => {
+        const { id } = await store.create('drive me');
+        const claim = await store.claim('w1', 300);
+        await store.suspend(id, claim!.leaseToken);
+
+        expect(await store.claim('w2', 300)).toBeNull();
+    });
+
+    // Parking is not a failed try. Without the give-back, a job parked three times is dead.
+    it('hands back the attempt it took, so parking is not a retry', async () => {
+        const { id } = await store.create('drive me');
+
+        for (let i = 0; i < 5; i += 1) {
+            const claim = await store.claim(`w${i}`, 300);
+            expect(claim).not.toBeNull();
+            await store.suspend(id, claim!.leaseToken);
+            await store.resume(id);
+        }
+
+        expect((await store.get(id))?.status).toBe('queued');
+        expect((await store.get(id))?.attempts).toBe(0);
+    });
+
+    // The whole point of standby: the claim carries the parked session back to the worker, which
+    // restores it instead of starting a new one — so the link the UI shows does not move.
+    it('hands the parked session back on the claim that resumes it', async () => {
+        const { id } = await store.create('drive me');
+        const first = await store.claim('w1', 300);
+        await store.session(id, first!.leaseToken, SESSION, REMOTE);
+        await store.suspend(id, first!.leaseToken);
+
+        expect(await store.resume(id)).toBe('ok');
+        const second = await store.claim('w2', 300);
+
+        expect(second).toMatchObject({ id, resumeSessionId: SESSION });
+        // Kept across the park too, so the link works while the job is waiting to be picked up.
+        expect((await store.get(id))?.remoteSessionId).toBe(REMOTE);
+    });
+
+    // A lease that expired mid-run is not a park: that attempt's session is not this one, and
+    // resuming it would replay a transcript whose output was thrown away.
+    it('does not offer a session to resume when it is reclaiming a crashed attempt', async () => {
+        const { id } = await store.create('echo hi');
+        const first = await store.claim('w1', 300);
+        await store.session(id, first!.leaseToken, SESSION, null);
+        await expireLease(id);
+
+        const second = await store.claim('w2', 300);
+
+        expect(second?.resumeSessionId).toBeNull();
+    });
+
+    it('refuses to park a job on a lease that has moved on', async () => {
+        const { id } = await store.create('echo hi');
+        const stale = await store.claim('w1', 300);
+        await expireLease(id);
+        await store.claim('w2', 300);
+
+        expect(await store.suspend(id, stale!.leaseToken)).toBe('lost');
+        expect(await store.suspend(ABSENT, stale!.leaseToken)).toBe('missing');
+    });
+
+    it('separates a job that is not parked from one that does not exist', async () => {
+        const { id } = await store.create('echo hi');
+
+        expect(await store.resume(id)).toBe('conflict');
+        expect(await store.resume(ABSENT)).toBe('missing');
     });
 
     it('leaves output out of the list projection', async () => {

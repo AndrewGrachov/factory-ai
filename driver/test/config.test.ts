@@ -17,6 +17,9 @@ describe('the driver config', () => {
             leaseSeconds: 300,
             jobTimeoutMs: 1_800_000,
             skipPermissions: false,
+            remoteControl: false,
+            idleMs: 3_600_000,
+            authVolume: 'claude-executor-auth',
         });
         expect(config.passEnv).toEqual(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
     });
@@ -45,6 +48,15 @@ describe('the driver config', () => {
         expect(loadDriverConfig({ RUNNER_SKIP_PERMISSIONS: '0' }).skipPermissions).toBe(false);
         expect(loadDriverConfig({ RUNNER_SKIP_PERMISSIONS: 'false' }).skipPermissions).toBe(false);
         expect(loadDriverConfig({ RUNNER_SKIP_PERMISSIONS: '' }).skipPermissions).toBe(false);
+    });
+
+    // Turning this on stops a job being run-to-completion: the container lives until the session is
+    // ended or the timeout kills it. A typo must not read as "on".
+    it('treats only an explicit value as a request for Remote Control', () => {
+        expect(loadDriverConfig({ RUNNER_REMOTE_CONTROL: '1' }).remoteControl).toBe(true);
+        expect(loadDriverConfig({ RUNNER_REMOTE_CONTROL: '0' }).remoteControl).toBe(false);
+        expect(loadDriverConfig({ RUNNER_REMOTE_CONTROL: 'false' }).remoteControl).toBe(false);
+        expect(loadDriverConfig({ RUNNER_REMOTE_CONTROL: '' }).remoteControl).toBe(false);
     });
 
     it('reads RUNNER_ENV as a list of names', () => {

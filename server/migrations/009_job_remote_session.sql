@@ -1,0 +1,15 @@
+-- The Remote Control session id, which is not the local one.
+--
+-- A runner started with --remote-control registers with claude.ai and gets back a second id, of the
+-- form `cse_015tb2nHhHNrBuL7ZDhn9Wx5`. It appears in the session transcript as
+-- {"type":"bridge-session","sessionId":"<local uuid>","bridgeSessionId":"cse_..."}. That is the id
+-- claude.ai/code addresses a session by, so it is the one a link is built from.
+--
+-- text, not uuid: it is a prefixed opaque token and would not survive the uuid type. Both columns
+-- exist because they answer different questions — session_id is a uuid that joins a job to its
+-- telemetry, and no join can be made on this one.
+--
+-- Unlike session_id, this cannot be minted in advance. It is assigned by Anthropic's backend when
+-- the bridge connects, so the worker has to report it once it has it, and it stays null for every
+-- headless job: a `-p` run never registers a bridge at all.
+alter table job add column if not exists remote_session_id text;

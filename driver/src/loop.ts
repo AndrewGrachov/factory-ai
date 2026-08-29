@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { Board, BoardJob } from './board.js';
 import type { DriverConfig } from './config.js';
-import type { Runner } from './docker.js';
+import type { RunSession, Runner } from './docker.js';
 
 export interface Loop {
     /** Resolves once `stop()` has been called and every in-flight job has finished. */
@@ -17,6 +18,10 @@ export interface LoopDeps {
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** The bridge connects a few seconds in; two minutes of looking is generous and bounded. */
+const REMOTE_POLL_MS = 3_000;
+const REMOTE_LOOKUPS = 40;
 
 interface JobState {
     finished: boolean;
@@ -74,22 +79,94 @@ export function createLoop({ board, runner, config, log = () => {}, sleep = wait
         })();
     }
 
+    /**
+     * Polls the running container for the Remote Control id and reports the first one it sees.
+     *
+     * Unlike the local session id this cannot be minted in advance — Anthropic's backend assigns it
+     * when the bridge connects, a few seconds into the run — so the worker has to go and find it.
+     * It is the id the Claude UI addresses the session by, and therefore the one a link is built
+     * from.
+     *
+     * Gives up quietly after `REMOTE_LOOKUPS` tries: a session that has not registered by then is a
+     * Remote Control that did not connect, and the run is no less valid for it.
+     */
+    function watchRemote(job: BoardJob, session: RunSession, state: JobState): Promise<void> {
+        return (async () => {
+            for (let i = 0; i < REMOTE_LOOKUPS && !state.finished && !state.lost; i += 1) {
+                await Promise.race([sleep(REMOTE_POLL_MS), state.woken]);
+                if (state.finished) return;
+                let remote: string | null;
+                try {
+                    remote = await runner.remoteSessionId(job, session.id);
+                } catch (e) {
+                    log(`job ${job.id}: could not read the remote session: ${(e as Error).message}`);
+                    return;
+                }
+                if (!remote) continue;
+                try {
+                    await board.session(job, session.id, remote);
+                    log(`job ${job.id}: remote session ${remote}`);
+                } catch (e) {
+                    log(`job ${job.id}: could not report the remote session: ${(e as Error).message}`);
+                }
+                return;
+            }
+        })();
+    }
+
     async function runJob(job: BoardJob): Promise<void> {
         const state = newJobState();
         const beating = heartbeat(job, state);
+        // A resumed job already has its session, and the board already knows it. A fresh one gets
+        // one minted here rather than read back from the runner, and reported before the container
+        // exists: the whole point is that the board holds the session for the attempt even if the
+        // run dies before it produces a line of output.
+        const session = job.resumeSessionId
+            ? { id: job.resumeSessionId, resume: true }
+            : { id: randomUUID(), resume: false };
+
+        // Only under Remote Control: a headless run registers no bridge, so looking for one would
+        // be forty `docker exec`s that can never find anything.
+        const watching = config.remoteControl ? watchRemote(job, session, state) : Promise.resolve();
 
         const settle = async () => {
             state.finished = true;
             state.wake();
-            await beating;
+            await Promise.all([beating, watching]);
         };
 
         try {
-            log(`job ${job.id}: attempt ${job.attempts} starting`);
-            const outcome = await runner.run(job);
+            log(
+                `job ${job.id}: attempt ${job.attempts} ` +
+                    `${session.resume ? 'resuming' : 'starting as'} session ${session.id}`,
+            );
+            if (!session.resume) {
+                try {
+                    await board.session(job, session.id, null);
+                } catch (e) {
+                    // Losing the link is not losing the job. A 'lost' verdict is not acted on
+                    // either — the heartbeat is what kills a superseded run, and duplicating that
+                    // here would give two places that decide it.
+                    log(`job ${job.id}: could not report the session, continuing: ${(e as Error).message}`);
+                }
+            }
+            const outcome = await runner.run(job, session);
             await settle();
 
             if (state.lost) return;
+
+            // Parked, not finished: the container is gone, the session is kept, and the job goes
+            // back on the board for somebody to pick up from the Claude UI. Reporting an exit code
+            // here would make an idle session indistinguishable from a run that ended.
+            if (outcome.idled) {
+                const verdict = await board.suspend(job);
+                log(
+                    verdict === 'lost'
+                        ? `job ${job.id}: idle, but the board had already reclaimed it`
+                        : `job ${job.id}: idle for ${config.idleMs}ms, parked on standby`,
+                );
+                return;
+            }
 
             const status = outcome.exitCode === 0 && !outcome.timedOut ? 'succeeded' : 'failed';
             const output = outcome.timedOut

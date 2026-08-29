@@ -248,6 +248,41 @@ expect_status 'the superseded worker is refused' 409 POST "/api/jobs/$reclaim_id
 api POST "/api/jobs/$reclaim_id/complete" \
     "{\"leaseToken\":\"$(field "$again" leaseToken)\",\"status\":\"succeeded\",\"exitCode\":0,\"output\":\"ok\"}" >/dev/null
 
+PARKED_SESSION='55555555-5555-4555-8555-555555555555'
+REMOTE_SESSION='cse_015tb2nHhHNrBuL7ZDhn9Wx5'
+
+# Standby, end to end: park a running job, prove it is not handed out while parked, resume it, and
+# check the claim carries the session back so the worker restores it rather than starting a new one.
+park_id="$(create_job 'park me')"
+park_claim="$(body "$(api POST /api/jobs/claim '{"worker":"parks","leaseSeconds":300}')")"
+park_token="$(field "$park_claim" leaseToken)"
+api POST "/api/jobs/$park_id/session" \
+    "{\"leaseToken\":\"$park_token\",\"sessionId\":\"$PARKED_SESSION\"}" >/dev/null
+# The second report of an attempt. Not a uuid — it is an opaque token minted by Anthropic's backend
+# when the Remote Control bridge connects, and it is what claude.ai/code addresses the session by.
+api POST "/api/jobs/$park_id/session" \
+    "{\"leaseToken\":\"$park_token\",\"sessionId\":\"$PARKED_SESSION\",\"remoteSessionId\":\"$REMOTE_SESSION\"}" >/dev/null
+expect_field 'the remote session is kept' "$(body "$(api GET "/api/jobs/$park_id")")" \
+    remoteSessionId "$REMOTE_SESSION"
+expect_status 'a running job can be parked'   200 POST "/api/jobs/$park_id/suspend" \
+    "{\"leaseToken\":\"$park_token\"}"
+parked="$(body "$(api GET "/api/jobs/$park_id")")"
+expect_field  'it is on standby'              "$parked" status standby
+expect_field  'it keeps its session'          "$parked" sessionId "$PARKED_SESSION"
+# The link has to keep working while the job waits to be picked up.
+expect_field  'and its remote session'        "$parked" remoteSessionId "$REMOTE_SESSION"
+# The reason standby is a status and not just an expired lease: an idle poll must not resume it.
+expect_status 'a parked job is not offered'   204 POST /api/jobs/claim '{"worker":"idle-poll"}'
+expect_status 'resume needs no lease token'   200 POST "/api/jobs/$park_id/resume" '{}'
+resumed="$(body "$(api POST /api/jobs/claim '{"worker":"resumes","leaseSeconds":300}')")"
+expect_field  'the resumed job comes back'    "$resumed" id "$park_id"
+expect_field  'the claim carries the session' "$resumed" resumeSessionId "$PARKED_SESSION"
+# Parking gave back the attempt it took, so this second claim is still attempt 1.
+expect_field  'parking did not burn a try'    "$resumed" attempts 1
+expect_status 'a running job cannot resume'   409 POST "/api/jobs/$park_id/resume" '{}'
+api POST "/api/jobs/$park_id/complete" \
+    "{\"leaseToken\":\"$(field "$resumed" leaseToken)\",\"status\":\"succeeded\",\"exitCode\":0,\"output\":\"ok\"}" >/dev/null
+
 # --- The driver ------------------------------------------------------------------------------
 
 echo
@@ -283,6 +318,16 @@ expect_field    'the exit code comes back' "$ran" exitCode 0
 expect_contains 'the prompt reached it'    "$(field "$ran" output)" 'first prompt'
 expect_contains 'the driver names itself'  "$(field "$ran" claimedBy)" driver-
 expect_field    'one attempt was enough'   "$ran" attempts 1
+
+# The driver mints the session id, passes it to the runner as --session-id and reports it to the
+# board. The stub echoes its arguments, so finding the reported id inside the output is what proves
+# the two are the same one — a link built from it opens the session the job actually ran as.
+session="$(field "$ran" sessionId)"
+case "$session" in
+    ????????-????-????-????-????????????) ok 'the session id was reported' ;;
+    *) bad 'the session id was reported' "got '$session'" ;;
+esac
+expect_contains 'the runner was given that id' "$(field "$ran" output)" "$session"
 
 stop_driver
 start_driver "$IMAGE_FAIL"

@@ -1,0 +1,16 @@
+-- The agent session a job's attempt ran as.
+--
+-- The driver mints this uuid and passes it to the runner as `claude --session-id <uuid>`, rather
+-- than reading it back out of the container. Scraping was the alternative and it is worse in every
+-- direction: an interactive Remote Control session prints its status into a TUI rather than onto
+-- stdout, and a runner that dies before printing anything would leave a job with no session at all.
+-- Minting it means the id exists before the container does.
+--
+-- Nullable, and stays null for every job written before this migration. It is also null for an
+-- attempt whose driver never reported — the report is deliberately non-fatal, so a board that was
+-- briefly unreachable costs the link, not the run.
+--
+-- No foreign key to the telemetry session tables: a session id is reported the moment the runner is
+-- spawned, and the telemetry row for it does not exist until the agent's first OTLP export — which
+-- may never happen at all if the run dies first, or if the collector is unreachable.
+alter table job add column if not exists session_id uuid;

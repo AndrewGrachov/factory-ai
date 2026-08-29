@@ -1,0 +1,227 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import postgres from 'postgres';
+import type { Sql } from 'postgres';
+import { migrate } from '../src/db/migrate.js';
+import { createJobStore, type JobStore } from '../src/db/job-store.js';
+
+const url = process.env.DATABASE_URL;
+
+/**
+ * This suite TRUNCATES the job table before every test. Requiring a `_test` database name is the
+ * guard, because the failure is silent: the tests pass and the queue is simply gone.
+ */
+function assertTestDatabase(raw: string): void {
+    const name = new URL(raw).pathname.replace(/^\//, '');
+    if (!/_test$/.test(name)) {
+        throw new Error(
+            `Refusing to run: this suite truncates its tables, and "${name}" is not a test database.`,
+        );
+    }
+}
+
+const enabled = Boolean(url);
+if (url) assertTestDatabase(url);
+
+let sql: Sql;
+let store: JobStore;
+/** A second store on the same pool, bound to a different org. Only the org guard uses it. */
+let otherOrgStore: JobStore;
+
+const ORG = 'test-org';
+const OTHER_ORG = 'other-org';
+/** A well-formed uuid, only ever used where the job or the lease is expected not to exist. */
+const ABSENT = '00000000-0000-4000-8000-000000000000';
+
+beforeAll(async () => {
+    if (!enabled) return;
+    // Higher than pr-store's `max: 2`: the claim exclusivity test needs real parallelism, and a
+    // pool of two would serialise it into a test that passes for the wrong reason.
+    sql = postgres(url as string, { max: 8 });
+    await migrate(sql, { orgId: ORG, attempts: 3 });
+    store = createJobStore({ sql, orgId: ORG });
+    otherOrgStore = createJobStore({ sql, orgId: OTHER_ORG });
+});
+
+afterAll(async () => {
+    if (enabled) await sql.end();
+});
+
+beforeEach(async () => {
+    if (!enabled) return;
+    await sql`truncate job`;
+});
+
+/** Ages a lease into the past. Deterministic where sleeping for a one-second lease is not. */
+const expireLease = (id: string) =>
+    sql`update job set lease_expires_at = now() - interval '1 second' where id = ${id}`;
+
+const row = (id: string) =>
+    sql<{ status: string; attempts: number; claimed_by: string | null; started_at: Date | null }[]>`
+        select status, attempts, claimed_by, started_at from job where id = ${id}
+    `;
+
+describe.skipIf(!enabled)('job store', () => {
+    it('queues a job and reads it back', async () => {
+        const { id } = await store.create('echo hi');
+
+        const job = await store.get(id);
+        expect(job).toMatchObject({ command: 'echo hi', status: 'queued', attempts: 0, maxAttempts: 3 });
+        expect(job?.startedAt).toBeNull();
+    });
+
+    it('hands a job to one claimer and holds it there while the lease is live', async () => {
+        const { id } = await store.create('echo hi');
+
+        const first = await store.claim('w1', 300);
+        expect(first).toMatchObject({ id, command: 'echo hi', attempts: 1 });
+
+        expect(await store.claim('w2', 300)).toBeNull();
+        expect((await row(id))[0]).toMatchObject({ status: 'running', claimed_by: 'w1' });
+    });
+
+    it('takes the oldest job first', async () => {
+        const { id: first } = await store.create('first');
+        const { id: second } = await store.create('second');
+
+        expect((await store.claim('w1', 300))?.id).toBe(first);
+        expect((await store.claim('w2', 300))?.id).toBe(second);
+    });
+
+    it('reclaims an expired lease with a fresh token and a bumped attempt', async () => {
+        const { id } = await store.create('echo hi');
+        const first = await store.claim('w1', 300);
+        const firstStart = (await row(id))[0]?.started_at as Date;
+        await expireLease(id);
+
+        const second = await store.claim('w2', 300);
+
+        expect(second).toMatchObject({ id, attempts: 2 });
+        expect(second?.leaseToken).not.toBe(first?.leaseToken);
+        // Reset per attempt, not kept from the first: otherwise every duration is measured from
+        // the run that died.
+        const secondStart = (await row(id))[0]?.started_at as Date;
+        expect(secondStart.getTime()).toBeGreaterThan(firstStart.getTime());
+    });
+
+    // Without this a command that kills its worker is handed out again every time its lease
+    // expires, forever, and one poison job permanently occupies a worker slot.
+    it('gives up on a job that has burned its attempts', async () => {
+        const { id } = await store.create('kill -9 $$');
+        await sql`update job set max_attempts = 1 where id = ${id}`;
+        await store.claim('w1', 300);
+        await expireLease(id);
+
+        expect(await store.claim('w2', 300)).toBeNull();
+        expect((await row(id))[0]?.status).toBe('dead');
+    });
+
+    it('extends a live lease on a heartbeat', async () => {
+        const { id } = await store.create('echo hi');
+        const claim = await store.claim('w1', 60);
+
+        const beat = await store.heartbeat(id, claim!.leaseToken, 600);
+
+        expect(beat.result).toBe('ok');
+        expect(Date.parse(beat.leaseExpiresAt as string)).toBeGreaterThan(Date.parse(claim!.leaseExpiresAt));
+    });
+
+    it('separates an unknown job from a lost lease', async () => {
+        const { id } = await store.create('echo hi');
+        const stale = await store.claim('w1', 300);
+        await expireLease(id);
+        await store.claim('w2', 300);
+
+        expect((await store.heartbeat(id, stale!.leaseToken, 300)).result).toBe('lost');
+        expect((await store.heartbeat(ABSENT, stale!.leaseToken, 300)).result).toBe('missing');
+    });
+
+    // The whole point of the fencing token: the two runs did different work, so the loser's report
+    // is refused rather than merged.
+    it('refuses a completion from a worker whose lease was reclaimed', async () => {
+        const { id } = await store.create('echo hi');
+        const stale = await store.claim('w1', 300);
+        await expireLease(id);
+        const winner = await store.claim('w2', 300);
+
+        const refused = await store.complete(id, stale!.leaseToken, {
+            status: 'succeeded',
+            exitCode: 0,
+            output: 'from the zombie',
+        });
+        const accepted = await store.complete(id, winner!.leaseToken, {
+            status: 'failed',
+            exitCode: 3,
+            output: 'from the live one',
+        });
+
+        expect(refused).toBe('lost');
+        expect(accepted).toBe('ok');
+        expect(await store.get(id)).toMatchObject({
+            status: 'failed',
+            exitCode: 3,
+            output: 'from the live one',
+        });
+    });
+
+    it('reports a completion for a job that does not exist', async () => {
+        const result = await store.complete(ABSENT, ABSENT, {
+            status: 'succeeded',
+            exitCode: 0,
+            output: null,
+        });
+        expect(result).toBe('missing');
+    });
+
+    it('leaves output out of the list projection', async () => {
+        const { id } = await store.create('echo hi');
+        const claim = await store.claim('w1', 300);
+        await store.complete(id, claim!.leaseToken, { status: 'succeeded', exitCode: 0, output: 'noise' });
+
+        const [listed] = await store.list({ limit: 10 });
+        expect(listed?.output).toBeNull();
+        expect((await store.get(id))?.output).toBe('noise');
+    });
+
+    it('filters the list by status', async () => {
+        await store.create('one');
+        const { id } = await store.create('two');
+        await store.claim('w1', 300);
+
+        expect(await store.list({ status: 'running', limit: 10 })).toHaveLength(1);
+        expect((await store.list({ status: 'queued', limit: 10 }))[0]?.id).toBe(id);
+    });
+
+    it('keeps one organization out of another organization queue', async () => {
+        const { id } = await store.create('echo hi');
+
+        expect(await otherOrgStore.claim('intruder', 300)).toBeNull();
+        expect(await otherOrgStore.get(id)).toBeNull();
+        expect(await store.claim('w1', 300)).not.toBeNull();
+    });
+
+    // Duplicates would prove a lost update; nulls would prove the row lock is being taken above the
+    // limit, so a contended row is counted and then discarded rather than skipped.
+    it('never hands the same job to two claimers', async () => {
+        const ids = new Set<string>();
+        for (let i = 0; i < 50; i += 1) ids.add((await store.create(`job ${i}`)).id);
+
+        const claims = await Promise.all(
+            Array.from({ length: 50 }, (_, i) => store.claim(`w${i}`, 300)),
+        );
+
+        expect(claims.filter((claim) => claim === null)).toHaveLength(0);
+        expect(new Set(claims.map((claim) => claim?.id)).size).toBe(50);
+    });
+
+    it('skips a locked row rather than waiting on it', async () => {
+        const { id: pinned } = await store.create('first');
+        const { id: next } = await store.create('second');
+
+        await sql.begin(async (tx) => {
+            await tx`select id from job where id = ${pinned} for update`;
+            // Would block forever without `skip locked`, and the test would time out rather than
+            // fail — which is itself the signal.
+            expect((await store.claim('w1', 300))?.id).toBe(next);
+        });
+    });
+});

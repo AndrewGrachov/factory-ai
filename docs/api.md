@@ -10,6 +10,16 @@ Read before: adding or changing a route, a status code, or a query parameter.
 | `POST /api/otlp/v1/metrics` | `200 {"partialSuccess":{}}`. 1 MB limit, JSON only. Registered only when a store exists. |
 | `POST /api/otlp/v1/logs` | `200`. Accepted and dropped — see M6 in the plan. |
 | `POST /api/sessions/branch` | `202`. `400` on a malformed body, never 5xx. |
+| `POST /api/jobs` | `201 { id, status }`. `400 BAD_COMMAND` on a missing, empty or over-16-KiB command. |
+| `POST /api/jobs/claim` | `200 { id, command, attempts, leaseToken, leaseExpiresAt }`, or **`204`** when nothing is waiting — an idle poll is the common case and must be recognisable without parsing a body. `400 BAD_WORKER` / `BAD_LEASE`. |
+| `POST /api/jobs/:id/heartbeat` | `200 { leaseExpiresAt }`. **`409 LEASE_LOST`** once the lease has been reclaimed — the driver kills the container on this, and it is the only signal a superseded worker gets. `404` unknown, `400 BAD_ID` / `BAD_TOKEN`. |
+| `POST /api/jobs/:id/complete` | `200`. `409 LEASE_LOST` for a report from a worker that no longer holds the job; refused, never merged. `404` unknown; `400` on a status outside `succeeded\|failed`. `output` is truncated to 64 KiB server side. |
+| `GET /api/jobs/:id` | `200` the job, `404` otherwise. |
+| `GET /api/jobs` | `200 { jobs }`. `?status=&limit=` (default 50, cap 200). `output` is omitted from the list projection — it is unbounded and no list view shows it. |
+
+- **The job routes are registered only when `buildApp` is given a job store**, like the ingest
+  routes. See [jobs.md](jobs.md) for the lease and fencing-token rules behind the `409`s.
+
 
 - **`meta.organization.mode` is a discriminant, never inferred from `available.length > 1`.** A
   directory user with one membership can be granted a second with no deploy; a control disabled by

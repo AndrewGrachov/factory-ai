@@ -5,7 +5,7 @@ services:
             dockerfile: docker/Dockerfile
         # There is no application-level auth, so the localhost bind is the access control.
         ports:
-            - '127.0.0.1:8081:8080'
+            - '127.0.0.1:8080:8080'
         # Every ${VAR} below is substituted from the repo-root .env, which compose reads on its own
         # — that is where GITHUB_TOKEN comes from, and .env is gitignored and dockerignored so it
         # never enters an image layer.
@@ -83,6 +83,50 @@ services:
             timeout: 5s
             retries: 3
             start_period: 10s
+
+    # Claims jobs from the board and spawns a claude-executor per job.
+    #
+    # BEHIND A PROFILE, and that is not tidiness: this service mounts the docker socket, which is
+    # root on the host. `docker compose up` must not start it by surprise. Start it deliberately:
+    #
+    #   docker build -t claude-executor docker/claude-executor   # the runner image, once
+    #   docker compose --profile driver up -d driver
+    driver:
+        profiles: ['driver']
+        build:
+            context: .
+            dockerfile: docker/driver.Dockerfile
+        environment:
+            JOB_BOARD_URL: http://dashboard:8080
+            # Only used to build the runner's WORKDIR, /workspaces/<org>. Empty-defaulted like the
+            # dashboard's, so a mounted factory.toml's organization still decides — but note the
+            # driver reads no config file, so an org set ONLY in factory.toml needs setting here.
+            ORG_ID: ${ORG_ID:-default}
+            EXECUTOR_IMAGE: ${EXECUTOR_IMAGE:-claude-executor}
+            # A volume name as the daemon knows it, hence the compose project prefix. Override if
+            # the project directory is not `factory-ai`.
+            WORKSPACE_VOLUME: ${WORKSPACE_VOLUME:-factory-ai_workspaces}
+            # Puts the runner on this compose network, which is the only place `collector` resolves.
+            # Without it the agent still works and its telemetry silently goes nowhere.
+            RUNNER_NETWORK: ${RUNNER_NETWORK:-factory-ai_default}
+            DRIVER_CONCURRENCY: ${DRIVER_CONCURRENCY:-2}
+            DRIVER_POLL_MS: ${DRIVER_POLL_MS:-5000}
+            DRIVER_LEASE_SECONDS: ${DRIVER_LEASE_SECONDS:-300}
+            DRIVER_JOB_TIMEOUT_MS: ${DRIVER_JOB_TIMEOUT_MS:-1800000}
+            # Off by default. On, the agent edits and runs whatever it likes inside the runner
+            # without asking; off, most jobs stall at a permission prompt nobody can answer. Read
+            # docs/jobs.md before setting it.
+            RUNNER_SKIP_PERMISSIONS: ${RUNNER_SKIP_PERMISSIONS:-}
+            # Forwarded to the runner by NAME, so the value never appears in a `docker run` argv.
+            CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+            ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+        volumes:
+            # Root on the host, in one line. See docs/security.md.
+            - /var/run/docker.sock:/var/run/docker.sock
+        depends_on:
+            dashboard:
+                condition: service_healthy
+        restart: unless-stopped
 
     # TimescaleDB rather than plain Postgres: metric_point is a real time-series table and
     # becomes a hypertable, while session_branch stays relational so the attribution join is

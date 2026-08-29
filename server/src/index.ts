@@ -1,6 +1,7 @@
 import postgres from 'postgres';
 import { buildApp } from './app.js';
 import { resolveConfig } from './config-file.js';
+import { createJobStore } from './db/job-store.js';
 import { migrate } from './db/migrate.js';
 import { createPrStore } from './db/pr-store.js';
 import { createPostgresTelemetryClient } from './telemetry/postgres-client.js';
@@ -58,8 +59,12 @@ const store = config.telemetrySource === 'postgres' ? createPostgresStore({ sql,
 const prStore = createPrStore({ sql, orgId: config.orgId, ready });
 console.log(`[persist] ${config.databaseUrl.replace(/\/\/[^@]*@/, '//')}`);
 
+// Unconditional, unlike the telemetry store: the database is mandatory and the board is not a
+// product option. It gates its own queries on `ready`, so it is safe to build before migrations.
+const jobStore = createJobStore({ sql, orgId: config.orgId, ready });
+
 const service = createStatsService({ config, client, telemetry, store: prStore });
-const app = await buildApp({ config, service, store, logger: true });
+const app = await buildApp({ config, service, store, jobs: jobStore, logger: true });
 
 // Fired, not awaited: prime() waits on the migration promise, and awaiting it here would
 // recreate exactly the hostage-taking that not awaiting migrate() avoids. ensureFresh() returns

@@ -19,6 +19,20 @@ source then sits in a plain directory next to a service with no auth. The token 
 through the child environment and never on a command line or into `.git/config` — see
 [workspace.md](workspace.md) for why that distinction is load-bearing.
 
+**The driver mounts `/var/run/docker.sock`, which is root on the host.** A process holding that
+socket can start a container with the host filesystem mounted, so it is not "docker access", it is
+uid 0. That is why the driver is a separate service behind a compose profile — `docker compose up`
+must not start it by accident — and why the socket is never given to the dashboard, whose port is
+unauthenticated. Anything that can queue a job can already ask an agent to run commands; keeping
+the socket one process away is what stops that from being trivially root.
+
+**The job board is a different class of risk from every other route here.** `POST /api/jobs` queues
+a shell command that a worker then runs against the organization's checkouts, with whatever
+credentials that worker holds. On this port, with no auth, the `127.0.0.1` bind is the only thing
+standing between an unauthenticated request and remote code execution. A driver running off-host
+removes exactly that — put authentication in front of the port *before* moving it, not after. See
+[jobs.md](jobs.md).
+
 The telemetry ingest routes are unauthenticated, and the collector listens on 4317/4318. Both are
 bound to `127.0.0.1` for the same reason as the dashboard. **Keep
 `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES` and `OTEL_LOG_TOOL_DETAILS` off** — set

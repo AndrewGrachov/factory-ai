@@ -16,6 +16,7 @@ of decisions that look like cruft and are not, and most are guarded by a test th
 | `config.ts`, `config-file.ts`, compose env blocks, `factory.toml` | [docs/configuration.md](docs/configuration.md) |
 | `server/src/workspace/*`, `ORG_WORKSPACE_ROOT`, the `git` install in the runtime image | [docs/workspace.md](docs/workspace.md) |
 | `server/src/telemetry/*`, OTLP routes, SQL views, collector config | [docs/telemetry.md](docs/telemetry.md) |
+| `server/src/routes/jobs.ts`, `db/job-store.ts`, `006_jobs.sql`, `driver/*` | [docs/jobs.md](docs/jobs.md) |
 | `filterPrs()`, `parseRange`, `revertForRange()`, the range selector, charts | [docs/date-range.md](docs/date-range.md) |
 | `server/src/store/*`, `stats-service.ts`, the sync watermark, migrations | [docs/persistence.md](docs/persistence.md) |
 | Routes, status codes, query parameters | [docs/api.md](docs/api.md) |
@@ -35,11 +36,16 @@ npm run dev            # builds core, then API on 127.0.0.1:8080 + Vite on 5173 
 npm run dev:server     # tsx watch, server only
 npm run dev:web        # vite only (needs the API running for /api)
 
-npm run build          # core -> server -> web, in that order
+npm run build          # core -> server -> web -> driver, in that order
 npm start              # node server/dist/index.js (requires build)
 
-npm test               # vitest run — offline, no token, no quota, no database
-npm run typecheck      # tsc -b across all three project references
+# The job driver: claims jobs from the board and spawns a claude-executor per job. Needs a docker
+# daemon and the runner image (`docker build -t claude-executor docker/claude-executor`). It talks
+# to the board over HTTP only — never to the database — so JOB_BOARD_URL is all it needs to find.
+npm run driver
+
+npm test               # vitest run — offline, no token, no quota, no database, no docker
+npm run typecheck      # tsc -b across all four project references
 
 # Real browser (chromium, headless). Builds, SEEDS factory_e2e, serves the SPA from the API on
 # 8123 and walks every date range. Still offline — no token, no quota, no network — but by way of
@@ -54,12 +60,22 @@ DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run seed
 
 docker compose up --build   # SPA + API on 127.0.0.1:8080, TimescaleDB, OTEL collector
 
+# The driver is behind a profile, so the line above never starts it: it mounts the docker socket,
+# which is root on the host. See docs/security.md.
+docker compose --profile driver up -d driver
+
 # factory_dev holds real data; *_test, *_seed, *_synthetic, *_demo and *_e2e are disposable. The db
 # suite TRUNCATES its tables, so it refuses any database not named *_test — pointing it at
 # factory_dev would silently destroy backfilled history, and the tests would still pass. loadConfig
 # mirrors that: a process WITH a token refuses to run against any disposable name at all.
 docker compose up -d timescale
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_test npm run test:db
+
+# The job board and its driver, end to end: a real board on 8129 against a real factory_jobs_test,
+# a real driver, and real containers — but no Claude and no credential. The runners are two stub
+# images that echo and exit, which is what makes the whole path assertable offline. Everything it
+# creates it drops. Needs docker and a free 8129.
+npm run test:jobs
 
 # Import history from ~/.claude/projects/*/*.jsonl. Idempotent; safe to re-run.
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_dev npm run backfill
@@ -86,7 +102,12 @@ built before the server or web can typecheck or run** — that is why `npm run d
 `npm run build` build it first. A stale `core/dist` produces type errors that look like source
 bugs. Fix with `npm run build -w core`.
 
-All three packages are ESM with `verbatimModuleSyntax`; relative imports carry a `.js`
+`driver` is the exception: it depends on nothing, `core` included, and its tsconfig has no project
+references. That is deliberate — it is a client of the HTTP board, and sharing types with the server
+would give a process that only needs `fetch` and `docker` the whole server dependency tree, plus a
+build order. If a type has to be shared, copy it.
+
+All four packages are ESM with `verbatimModuleSyntax`; relative imports carry a `.js`
 extension even in `.tsx` files.
 
 Tests import `core/src` directly (`../src/metrics.js`), so `core/test` does not need the build.

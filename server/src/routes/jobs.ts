@@ -1,0 +1,192 @@
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { JobOutcome, JobStatus, JobStore } from '../db/job-store.js';
+
+/**
+ * A command is a shell line, not a payload. 16 KiB is far past anything a human writes, and past
+ * anything a generated one should be; the body limit is a little above it so an oversized command
+ * is refused with a reason rather than a bare connection error.
+ */
+const COMMAND_LIMIT = 16_384;
+const BODY_LIMIT = 128 * 1024;
+
+/**
+ * Output is truncated here, not trusted from the worker. The body limit lets 128 KiB through and a
+ * job's tail is for debugging, not archival — the OTLP pipeline is where logs belong.
+ */
+const OUTPUT_LIMIT = 64 * 1024;
+
+const LEASE_SECONDS_DEFAULT = 300;
+const LEASE_SECONDS_MAX = 3600;
+
+const LIST_LIMIT_DEFAULT = 50;
+const LIST_LIMIT_MAX = 200;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const STATUSES: readonly JobStatus[] = ['queued', 'running', 'succeeded', 'failed', 'dead'];
+
+const body = (raw: unknown): Record<string, unknown> =>
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+
+const bad = (reply: FastifyReply, code: string, error: string) => reply.code(400).send({ error, code });
+
+/**
+ * Every store call funnels through here: a write failure is a 503, matching the ingest routes.
+ *
+ * The result is wrapped rather than nullable because `claim` and `get` both return null for a
+ * perfectly good answer — no work waiting, no such job — and a bare null could not tell that from
+ * a database that is down.
+ */
+async function guard<T>(
+    reply: FastifyReply,
+    log: (e: Error) => void,
+    run: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false }> {
+    try {
+        return { ok: true, value: await run() };
+    } catch (e) {
+        log(e as Error);
+        await reply.code(503).send({ error: (e as Error).message, code: 'UNAVAILABLE' });
+        return { ok: false };
+    }
+}
+
+function leaseSeconds(raw: unknown): number | null {
+    if (raw === undefined || raw === null) return LEASE_SECONDS_DEFAULT;
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1 || raw > LEASE_SECONDS_MAX) return null;
+    return raw;
+}
+
+export const jobRoutes =
+    (store: JobStore): FastifyPluginAsync =>
+    async (app) => {
+        app.post('/api/jobs', { bodyLimit: BODY_LIMIT }, async (request, reply) => {
+            const command = body(request.body).command;
+            if (typeof command !== 'string' || !command.trim()) {
+                return bad(reply, 'BAD_COMMAND', 'command must be a non-empty string');
+            }
+            if (command.length > COMMAND_LIMIT) {
+                return bad(reply, 'BAD_COMMAND', `command exceeds ${COMMAND_LIMIT} characters`);
+            }
+
+            const created = await guard(reply, (e) => request.log.error({ err: e }, 'job create failed'), () =>
+                store.create(command),
+            );
+            if (!created.ok) return reply;
+            return reply.code(201).send({ id: created.value.id, status: 'queued' });
+        });
+
+        // POST, not GET: claiming mutates. The worker id is required — it is the only thing that
+        // says which container is holding a job when one has to be found and killed.
+        app.post('/api/jobs/claim', { bodyLimit: 4096 }, async (request, reply) => {
+            const { worker, leaseSeconds: requested } = body(request.body);
+            if (typeof worker !== 'string' || !worker.trim() || worker.length > 128) {
+                return bad(reply, 'BAD_WORKER', 'worker must be a non-empty string');
+            }
+            const lease = leaseSeconds(requested);
+            if (lease === null) {
+                return bad(reply, 'BAD_LEASE', `leaseSeconds must be an integer 1..${LEASE_SECONDS_MAX}`);
+            }
+
+            const claim = await guard(reply, (e) => request.log.error({ err: e }, 'job claim failed'), () =>
+                store.claim(worker, lease),
+            );
+            if (!claim.ok) return reply;
+            // 204, not 200 with a null: an idle poll is the common case and it should not have to
+            // be parsed to be recognised.
+            if (claim.value === null) return reply.code(204).send();
+            return reply.code(200).send(claim.value);
+        });
+
+        app.post('/api/jobs/:id/heartbeat', { bodyLimit: 4096 }, async (request, reply) => {
+            const id = (request.params as { id: string }).id;
+            if (!UUID.test(id)) return bad(reply, 'BAD_ID', 'id must be a uuid');
+
+            const { leaseToken, leaseSeconds: requested } = body(request.body);
+            if (typeof leaseToken !== 'string' || !UUID.test(leaseToken)) {
+                return bad(reply, 'BAD_TOKEN', 'leaseToken must be a uuid');
+            }
+            const lease = leaseSeconds(requested);
+            if (lease === null) {
+                return bad(reply, 'BAD_LEASE', `leaseSeconds must be an integer 1..${LEASE_SECONDS_MAX}`);
+            }
+
+            const beat = await guard(reply, (e) => request.log.error({ err: e }, 'job heartbeat failed'), () =>
+                store.heartbeat(id, leaseToken, lease),
+            );
+            if (!beat.ok) return reply;
+            if (beat.value.result === 'missing') {
+                return reply.code(404).send({ error: 'No such job', code: 'NOT_FOUND' });
+            }
+            // The board cannot stop a worker, only refuse it. A 409 here means this container is
+            // running a job that belongs to someone else now, and it must terminate itself.
+            if (beat.value.result === 'lost') {
+                return reply.code(409).send({ error: 'Lease lost', code: 'LEASE_LOST' });
+            }
+            return reply.code(200).send({ leaseExpiresAt: beat.value.leaseExpiresAt });
+        });
+
+        app.post('/api/jobs/:id/complete', { bodyLimit: BODY_LIMIT }, async (request, reply) => {
+            const id = (request.params as { id: string }).id;
+            if (!UUID.test(id)) return bad(reply, 'BAD_ID', 'id must be a uuid');
+
+            const { leaseToken, status, exitCode, output } = body(request.body);
+            if (typeof leaseToken !== 'string' || !UUID.test(leaseToken)) {
+                return bad(reply, 'BAD_TOKEN', 'leaseToken must be a uuid');
+            }
+            if (status !== 'succeeded' && status !== 'failed') {
+                return bad(reply, 'BAD_STATUS', "status must be 'succeeded' or 'failed'");
+            }
+            if (exitCode !== undefined && exitCode !== null && !Number.isInteger(exitCode)) {
+                return bad(reply, 'BAD_EXIT_CODE', 'exitCode must be an integer or null');
+            }
+            if (output !== undefined && output !== null && typeof output !== 'string') {
+                return bad(reply, 'BAD_OUTPUT', 'output must be a string or null');
+            }
+
+            const result = await guard(reply, (e) => request.log.error({ err: e }, 'job complete failed'), () =>
+                store.complete(id, leaseToken, {
+                    status: status as JobOutcome,
+                    exitCode: (exitCode as number | undefined) ?? null,
+                    output: typeof output === 'string' ? output.slice(0, OUTPUT_LIMIT) : null,
+                }),
+            );
+            if (!result.ok) return reply;
+            if (result.value === 'missing') {
+                return reply.code(404).send({ error: 'No such job', code: 'NOT_FOUND' });
+            }
+            if (result.value === 'lost') {
+                return reply.code(409).send({ error: 'Lease lost', code: 'LEASE_LOST' });
+            }
+            return reply.code(200).send({ id, status });
+        });
+
+        app.get('/api/jobs/:id', async (request, reply) => {
+            const id = (request.params as { id: string }).id;
+            if (!UUID.test(id)) return bad(reply, 'BAD_ID', 'id must be a uuid');
+
+            const job = await guard(reply, (e) => request.log.error({ err: e }, 'job read failed'), () =>
+                store.get(id),
+            );
+            if (!job.ok) return reply;
+            if (job.value === null) return reply.code(404).send({ error: 'No such job', code: 'NOT_FOUND' });
+            return reply.code(200).send(job.value);
+        });
+
+        app.get('/api/jobs', async (request, reply) => {
+            const query = request.query as { status?: string; limit?: string };
+            if (query.status !== undefined && !STATUSES.includes(query.status as JobStatus)) {
+                return bad(reply, 'BAD_STATUS', `status must be one of ${STATUSES.join(', ')}`);
+            }
+            const limit = query.limit === undefined ? LIST_LIMIT_DEFAULT : Number(query.limit);
+            if (!Number.isInteger(limit) || limit < 1 || limit > LIST_LIMIT_MAX) {
+                return bad(reply, 'BAD_LIMIT', `limit must be an integer 1..${LIST_LIMIT_MAX}`);
+            }
+
+            const jobs = await guard(reply, (e) => request.log.error({ err: e }, 'job list failed'), () =>
+                store.list({ status: query.status as JobStatus | undefined, limit }),
+            );
+            if (!jobs.ok) return reply;
+            return reply.code(200).send({ jobs: jobs.value });
+        });
+    };

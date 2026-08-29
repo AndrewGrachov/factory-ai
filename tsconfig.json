@@ -3,6 +3,7 @@
     "references": [
         { "path": "./core" },
         { "path": "./server" },
-        { "path": "./web" }
+        { "path": "./web" },
+        { "path": "./driver" }
     ]
 }

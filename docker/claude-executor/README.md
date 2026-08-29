@@ -8,6 +8,7 @@ checkout; it does not build or run this repo's application.
 | Path | Becomes |
 | --- | --- |
 | `Dockerfile` | the image — Node 24 (debian), git, `@anthropic-ai/claude-code`, `acli`, the `context-mode` plugin |
+| `entrypoint.sh` | `/usr/local/bin/claude-executor` — the `ENTRYPOINT` |
 | `claude-home/` | `/home/node/.claude` inside the image, via `CLAUDE_CONFIG_DIR` |
 | `claude-home/settings.json` | telemetry configuration |
 | `claude-home/CLAUDE.md` | the global instructions every session loads |
@@ -70,8 +71,24 @@ docker run --rm -it \
     claude-executor -p 'summarise the diff on this branch'
 ```
 
-`ANTHROPIC_API_KEY` works in place of `CLAUDE_CODE_OAUTH_TOKEN`. `ENTRYPOINT` is `claude`, so
-arguments after the image name go straight to the CLI.
+`ANTHROPIC_API_KEY` works in place of `CLAUDE_CODE_OAUTH_TOKEN`.
+
+`ENTRYPOINT` is the `claude-executor` wrapper: it changes into `$WORKDIR`, then `exec`s `claude`
+with every argument given after the image name. Arguments reach the CLI unchanged — the wrapper
+adds no flags and interprets none.
+
+```bash
+# Run against a subdirectory of the mount, or a second checkout, without rebuilding
+docker run --rm -e WORKDIR=/workspace/server -v "$PWD:/workspace" claude-executor -p '...'
+docker run --rm -e WORKDIR=/other -v "$PWD:/workspace" -v ~/src/api:/other claude-executor -p '...'
+```
+
+`WORKDIR` defaults to `/workspace` and must exist — the wrapper exits `2` with a message rather
+than letting `claude` start in the wrong directory and answer about the wrong tree.
+
+It also marks the checkout `safe.directory` when one is mounted. A bind mount keeps the host's uid,
+which is rarely the container's 1000, and git otherwise refuses the repository outright with a
+"dubious ownership" error that never mentions uids.
 
 ## Telemetry
 

@@ -36,6 +36,9 @@ COPY --chown=node:node claude-home/ /home/node/.claude/
 RUN mkdir -p /workspace && chown node:node /workspace
 WORKDIR /workspace
 
+COPY entrypoint.sh /usr/local/bin/claude-executor
+RUN chmod 0755 /usr/local/bin/claude-executor
+
 USER node
 
 # Baked in at build time rather than resolved on first run: a cold container would otherwise clone
@@ -46,5 +49,8 @@ USER node
 RUN claude plugin marketplace add mksglu/context-mode \
     && claude plugin install context-mode@context-mode
 
-ENTRYPOINT ["claude"]
+# The wrapper cds into $WORKDIR (default /workspace) before exec'ing claude with every argument
+# given after the image name, so a caller can point one image at a subdirectory or at a second
+# mounted checkout without rebuilding.
+ENTRYPOINT ["claude-executor"]
 CMD ["--help"]

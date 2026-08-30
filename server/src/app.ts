@@ -1,7 +1,11 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import type { GitHubIdentityClient } from './auth/github.js';
+import { registerAuth } from './auth/plugin.js';
+import type { AuthStore } from './auth/store.js';
 import type { AppConfig } from './config.js';
 import type { JobStore } from './db/job-store.js';
+import { authRoutes } from './routes/auth.js';
 import { healthRoutes } from './routes/health.js';
 import { ingestRoutes } from './routes/ingest.js';
 import { jobRoutes } from './routes/jobs.js';
@@ -16,6 +20,20 @@ export interface AppDeps {
     store?: TelemetryStore | undefined;
     /** Same bargain: no job board without a store behind it, so the routes are not registered. */
     jobs?: JobStore | undefined;
+    /**
+     * Absent means no auth at all — no hook, no /api/auth routes, every route open.
+     *
+     * This is the ROUTE TESTS' mode, not a deployment's: index.ts always supplies one, because the
+     * database is mandatory and there is therefore always somewhere for accounts to live. It exists
+     * so the seventeen route-test files that predate accounts keep driving the app with no cookie,
+     * and it is the same bargain `store` and `jobs` already make.
+     *
+     * A deployment that wants everything open sets AUTH_MODE=none, which is a different thing: the
+     * hook still runs and still resolves a caller, so there is one code path rather than two.
+     */
+    auth?: AuthStore | undefined;
+    /** The OAuth exchange. Absent under AUTH_MODE=none, where there is nothing to exchange with. */
+    identity?: GitHubIdentityClient | undefined;
     /** Preset ranges are a lookback from now, so the routes need the same injection point. */
     now?: () => number;
     logger?: boolean;
@@ -43,6 +61,8 @@ export async function buildApp({
     service,
     store,
     jobs,
+    auth,
+    identity,
     now = Date.now,
     logger = false,
 }: AppDeps): Promise<FastifyInstance> {
@@ -55,7 +75,14 @@ export async function buildApp({
         reply.header('Referrer-Policy', 'no-referrer');
     });
 
+    // Before every route, so nothing can be registered ahead of the wall by accident. Without a
+    // store the property is still decorated, so `request.auth` reads the same everywhere rather than
+    // being absent in one configuration and null in another.
+    if (auth) await registerAuth(app, { config, store: auth });
+    else app.decorateRequest('auth', null);
+
     await app.register(healthRoutes(config));
+    if (auth) await app.register(authRoutes({ config, store: auth, identity }));
     await app.register(statsRoutes(config, service, now));
     if (store) await app.register(ingestRoutes(store));
     if (jobs) await app.register(jobRoutes(jobs));

@@ -1,5 +1,7 @@
 import postgres from 'postgres';
 import { buildApp } from './app.js';
+import { callbackPath, createGitHubIdentityClient } from './auth/github.js';
+import { createAuthStore } from './auth/store.js';
 import { resolveConfig } from './config-file.js';
 import { createJobStore } from './db/job-store.js';
 import { migrate } from './db/migrate.js';
@@ -40,7 +42,17 @@ const sql = postgres(config.databaseUrl, { max: 4 });
 //
 // orgId is required: migrate() also adopts pre-organization rows into it, and that adoption is the
 // only thing standing between a warm database and an empty dashboard.
-const ready = migrate(sql, { orgId: config.orgId, log: (m) => console.log(`[migrate] ${m}`) });
+//
+// It also seeds the organization row, the bootstrap admin, and — under AUTH_MODE=none — the stand-in
+// account every request is attributed to. All of those read the config, so none of them can live in
+// a .sql file.
+const ready = migrate(sql, {
+    orgId: config.orgId,
+    orgName: config.orgName,
+    bootstrapAdmin: config.auth.mode === 'github' ? config.auth.bootstrapAdmin : null,
+    localUser: config.auth.mode === 'none',
+    log: (m) => console.log(`[migrate] ${m}`),
+});
 ready.catch((e: Error) => console.error(`[migrate] giving up: ${e.message}`));
 
 // `off` is a product choice — render no AI panels — not a way to avoid the database, which is why
@@ -63,8 +75,51 @@ console.log(`[persist] ${config.databaseUrl.replace(/\/\/[^@]*@/, '//')}`);
 // product option. It gates its own queries on `ready`, so it is safe to build before migrations.
 const jobStore = createJobStore({ sql, orgId: config.orgId, ready });
 
+// Unconditional, for the same reason the job store is: the database is mandatory, so there is
+// always somewhere for accounts to live. buildApp's optional `auth` is for the route tests.
+const authStore = createAuthStore({ sql, ready });
+const identity = config.auth.mode === 'github' ? createGitHubIdentityClient(config.auth) : undefined;
+
+if (config.auth.mode === 'github') {
+    console.log(`[auth] GitHub sign-in, callback ${config.auth.publicUrl}${callbackPath}`);
+    if (!config.auth.cookieSecure) {
+        console.log('[auth] cookie_secure is off: the session cookie will travel over plain http');
+    }
+    // Loud, because a configurable authorize URL that reached a real deployment would be a phishing
+    // vector, and the only defence against that is it being impossible to miss in the log.
+    if (config.auth.authorizeUrl !== 'https://github.com/login/oauth/authorize') {
+        console.warn(`[auth] NOT using github.com: authorize URL is ${config.auth.authorizeUrl}`);
+    }
+    // The upgrade lockout, caught before somebody spends an afternoon on it: after 010 an existing
+    // database has rows, no users and no memberships, and every route then 401s with nothing said.
+    void ready
+        .then(() => authStore.listMembers(config.orgId))
+        .then((members) => {
+            if (members.length) return;
+            console.warn(
+                `[auth] "${config.orgId}" has no members, so nobody can sign in. Set auth.bootstrap_admin, or run: npm run invite -- --org ${config.orgId} --login <github-login> --role admin`,
+            );
+        })
+        .catch(() => {});
+} else {
+    // Unconditional and blunt, in the register of the "[fetch] no GITHUB_TOKEN" line above: the
+    // whole point of AUTH_MODE being an explicit enum is that nobody arrives here by accident, and
+    // the line is what makes staying here a choice too.
+    console.log(
+        '[auth] AUTH_MODE=none: every route is open to anyone who can reach this port, including POST /api/jobs, which runs shell commands',
+    );
+}
+
 const service = createStatsService({ config, client, telemetry, store: prStore });
-const app = await buildApp({ config, service, store, jobs: jobStore, logger: true });
+const app = await buildApp({
+    config,
+    service,
+    store,
+    jobs: jobStore,
+    auth: authStore,
+    identity,
+    logger: true,
+});
 
 // Fired, not awaited: prime() waits on the migration promise, and awaiting it here would
 // recreate exactly the hostage-taking that not awaiting migrate() avoids. ensureFresh() returns

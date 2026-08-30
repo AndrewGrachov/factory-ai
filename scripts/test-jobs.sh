@@ -57,17 +57,23 @@ trap cleanup EXIT
 
 # --- HTTP, in node, so the script needs neither curl nor jq ----------------------------------
 
+# BASE and AUTH_HEADER are read from the environment, so a single call can be aimed at the
+# authenticated board or carry a worker token without every existing call site growing two
+# arguments it does not use.
 api() { # api METHOD PATH [json] -> "<status>\t<body>"
     node -e '
-const [base, method, path, body] = process.argv.slice(1);
+const [base, method, path, body, auth] = process.argv.slice(1);
 fetch(base + path, {
     method,
-    headers: body ? { "content-type": "application/json" } : {},
+    headers: {
+        ...(body ? { "content-type": "application/json" } : {}),
+        ...(auth ? { authorization: auth } : {}),
+    },
     body: body || undefined,
 })
     .then(async (r) => process.stdout.write(r.status + "\t" + (await r.text()).replace(/\s+/g, " ")))
     .catch((e) => process.stdout.write("000\t" + e.message));
-' "$BASE" "$1" "$2" "${3:-}"
+' "$BASE" "$1" "$2" "${3:-}" "${AUTH_HEADER:-}"
 }
 
 status() { printf '%s' "${1%%$'\t'*}"; }
@@ -85,6 +91,12 @@ expect_status() { # expect_status <name> <want> <method> <path> [json]
     out="$(api "$@")"
     got="$(status "$out")"
     if [ "$got" = "$want" ]; then ok "$name"; else bad "$name" "wanted $want, got $got: $(body "$out")"; fi
+}
+
+expect_status_at() { # expect_status_at <base> <name> <want> <method> <path> [json]
+    local base="$1"
+    shift
+    BASE="$base" expect_status "$@"
 }
 
 expect_field() { # expect_field <name> <json> <key> <want>
@@ -343,6 +355,81 @@ stop_driver
 # Nothing may be left running: every runner is --rm, and the driver drains before it exits.
 leftover="$(docker ps -aq --filter label=factory.job | wc -l | tr -d ' ')"
 if [ "$leftover" = '0' ]; then ok 'no containers left behind'; else bad 'no containers left behind' "$leftover remain"; fi
+
+# --- The same board, with auth on -------------------------------------------------------------
+#
+# Everything above runs against AUTH_MODE=none, which is what this script has always been and what
+# it must keep exercising: that mode is what `npm run seed`, the route harness and `git clone && npm
+# run dev` all depend on. This section is the other half — the only end-to-end proof that the two
+# credentials really are disjoint, that a human cannot claim a lease and a worker cannot queue a job.
+
+echo
+echo '# auth'
+
+kill "$server_pid" 2>/dev/null
+wait "$server_pid" 2>/dev/null
+server_pid=""
+
+AUTH_PORT=$((PORT + 1))
+AUTH_BASE="http://127.0.0.1:$AUTH_PORT"
+
+env -u GITHUB_TOKEN DATABASE_URL="$DATABASE_URL" PORT="$AUTH_PORT" HOST=127.0.0.1 \
+    FACTORY_CONFIG="$work/factory.toml" ORG_WORKSPACE_ROOT= \
+    AUTH_MODE=github \
+    GITHUB_OAUTH_CLIENT_ID=stub-client GITHUB_OAUTH_CLIENT_SECRET=stub-secret \
+    SESSION_SECRET=a-job-harness-session-secret-32-chars \
+    node server/dist/index.js >"$work/auth-server.log" 2>&1 &
+server_pid=$!
+
+up=""
+for _ in $(seq 1 40); do
+    [ "$(status "$(BASE="$AUTH_BASE" api GET /api/health)")" = '200' ] && {
+        up=1
+        break
+    }
+    sleep 1
+done
+
+if [ -z "$up" ]; then
+    bad 'the authenticated board came up' "$(tail -5 "$work/auth-server.log")"
+else
+    ok 'the authenticated board came up'
+
+    # Open, because the compose healthcheck carries no credential and this route has to answer
+    # while the migrations are still retrying.
+    expect_status_at "$AUTH_BASE" 'health stays open'           200 GET /api/health
+    expect_status_at "$AUTH_BASE" 'the dashboard needs a login' 401 GET '/api/stats?range=all'
+    # The route docs/security.md calls remote code execution. This is the assertion the whole
+    # change exists for.
+    expect_status_at "$AUTH_BASE" 'queueing a job needs a login' 401 POST /api/jobs '{"command":"rm -rf /"}'
+    expect_status_at "$AUTH_BASE" 'claiming needs a worker token' 401 POST /api/jobs/claim '{"worker":"driver-1"}'
+
+    # Minted the way an operator mints one: printed once, only its hash stored. Pointed at the same
+    # empty config the board uses — the CLI runs loadConfig too, so the repo's own factory.toml
+    # would otherwise refuse a *_test database on account of the token in it.
+    token="$(env -u GITHUB_TOKEN DATABASE_URL="$DATABASE_URL" FACTORY_CONFIG="$work/factory.toml" \
+        node server/dist/admin/worker-token.js --name harness-driver 2>>"$work/auth-server.log" |
+        sed -n 's/.*JOB_BOARD_TOKEN=//p' | tr -d ' \r')"
+    case "$token" in
+    fwt_*) ok 'a worker token was minted' ;;
+    *) bad 'a worker token was minted' "got '$token'" ;;
+    esac
+
+    claim="$(AUTH_HEADER="Bearer $token" BASE="$AUTH_BASE" api POST /api/jobs/claim '{"worker":"harness-driver"}')"
+    case "$(status "$claim")" in
+    200 | 204) ok 'a worker token claims' ;;
+    *) bad 'a worker token claims' "got $(status "$claim"): $(body "$claim")" ;;
+    esac
+
+    # The other direction, and the one that is easy to get wrong: a credential that may claim work
+    # must not be able to create it, or the job it queues has no author.
+    queued="$(AUTH_HEADER="Bearer $token" BASE="$AUTH_BASE" api POST /api/jobs '{"command":"echo hi"}')"
+    if [ "$(status "$queued")" = '401' ]; then
+        ok 'a worker token cannot queue a job'
+    else
+        bad 'a worker token cannot queue a job' "got $(status "$queued")"
+    fi
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

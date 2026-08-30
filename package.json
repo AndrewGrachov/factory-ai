@@ -25,6 +25,8 @@
         "typecheck": "tsc -b",
         "backfill": "npm run build -w core && npm run build -w server && node server/dist/backfill/cli.js",
         "seed": "npm run build -w core && npm run build -w server && node server/dist/seed/cli.js",
+        "invite": "npm run build -w core && npm run build -w server && node --env-file-if-exists=.env server/dist/admin/invite.js",
+        "worker-token": "npm run build -w core && npm run build -w server && node --env-file-if-exists=.env server/dist/admin/worker-token.js",
         "fixture:canonical": "npm run build -w core && tsx server/scripts/capture-canonical.ts"
     },
     "devDependencies": {

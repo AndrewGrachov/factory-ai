@@ -28,9 +28,21 @@ function write(contents: string, name = 'factory.toml'): string {
  */
 const DB = 'postgres://factory:factory@127.0.0.1:5432/factory_dev';
 
+/**
+ * Same reasoning, for the same reason: two cases here set `host = "0.0.0.0"` to exercise the file
+ * layer, and AUTH_MODE defaults to `none`, which refuses a bind reachable from off the machine. The
+ * hatch is how that combination is expressed, so it is a baseline rather than a surprise in the two
+ * cases that are about something else entirely. A case that IS about the refusal overrides it.
+ */
+const ALLOW_PUBLIC = '1';
+
 function resolve(toml: string | null, env: NodeJS.ProcessEnv = {}) {
     if (toml !== null) write(toml);
-    return resolveConfig({ env: { DATABASE_URL: DB, ...env }, cwd: dir, warn });
+    return resolveConfig({
+        env: { DATABASE_URL: DB, AUTH_ALLOW_PUBLIC_BIND: ALLOW_PUBLIC, ...env },
+        cwd: dir,
+        warn,
+    });
 }
 
 beforeEach(() => {

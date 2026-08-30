@@ -14,7 +14,17 @@ request rather than a 202.
 - **`memoryPrStore()` in `server/test/helpers.ts` is what keeps `npm test` offline.** Requiring a
   store is a statement about *persistence being the only source*, not about PostgreSQL: it
   implements `PrStore` in full and `harness()` defaults to it, so the offline suite needs no
-  container. Do not read the requirement as "tests need a database".
+  container. Do not read the requirement as "tests need a database". `memoryAuthStore()` does the
+  same job for accounts, sessions and worker tokens.
+- **`010_auth.sql` adds `organization`, `app_user`, `org_membership`, `session` and `worker_token`,
+  plus `job.created_by`.** Only `org_membership` and `worker_token` lead with `org_id` — see
+  [organizations.md](organizations.md) for why an identity is not org-owned. The parts of the
+  migration that read the config (seeding the organization row, the bootstrap admin, the
+  `AUTH_MODE=none` stand-in account) live in `db/migrate.ts` beside `adoptOrg()`, for the reason
+  `adoptOrg()` is there: a `.sql` file cannot see the config, and guessing wrong is silent.
+- **`migrate()` also reaps expired sessions**, at boot only. The read path checks `expires_at`
+  regardless, so this is about the table not growing without bound on a deployment whose users never
+  log out — not about enforcement.
 - **Synthetic data reaches a database only through `npm run seed`, into a disposable one.** The
   dangerous combination is still inexpressible, just relocated: it used to be prevented by deriving
   `persistence` from `DATA_SOURCE`, and is now prevented by the seeding CLI's name allowlist plus

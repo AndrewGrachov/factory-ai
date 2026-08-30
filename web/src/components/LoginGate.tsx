@@ -1,0 +1,50 @@
+import type { ReactNode } from 'react';
+import { useSession } from '../api/useSession.js';
+
+/** What the callback redirects back with when it could not sign somebody in. */
+const REASONS: Record<string, string> = {
+    denied: 'Sign-in was cancelled.',
+    state: 'That sign-in link expired. Try again.',
+    github: 'GitHub could not be reached. Try again.',
+    no_membership: 'That GitHub account has not been invited to this organization.',
+};
+
+/**
+ * Stands between the dashboard and anyone who has not signed in.
+ *
+ * The gate is in the client rather than a redirect on the server, because the SPA's own document is
+ * deliberately served without authentication: if index.html 401'd there would be nothing left to
+ * render a sign-in button in.
+ */
+export function LoginGate({ children }: { children: ReactNode }) {
+    const { session, loading, error } = useSession();
+
+    // Nothing at all until the first answer. A sign-in screen that flashes for 80ms on every load
+    // for somebody who is already signed in reads as a bug.
+    if (loading) return null;
+    if (session) return <>{children}</>;
+
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get('auth_error');
+    const returnTo = `${window.location.pathname}${window.location.hash}`;
+
+    return (
+        <main className="login-gate">
+            <h1>Factory Stats</h1>
+            {error ? (
+                <p className="login-error">{error}</p>
+            ) : (
+                <p>Sign in with the GitHub account you were invited with.</p>
+            )}
+            {reason ? <p className="login-error">{REASONS[reason] ?? 'Sign-in failed.'}</p> : null}
+            {/*
+                A plain link, and it has to be. A `fetch` cannot follow a 302 to github.com, and a
+                <form method="get"> is blocked outright by `form-action 'none'` in the CSP — which is
+                worth keeping, so this stays an anchor.
+            */}
+            <a className="login-button" href={`/api/auth/github?returnTo=${encodeURIComponent(returnTo)}`}>
+                Sign in with GitHub
+            </a>
+        </main>
+    );
+}

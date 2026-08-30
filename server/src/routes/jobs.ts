@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import { callerOf } from '../auth/plugin.js';
 import type { JobOutcome, JobStatus, JobStore } from '../db/job-store.js';
 
 /**
@@ -72,8 +73,13 @@ export const jobRoutes =
                 return bad(reply, 'BAD_COMMAND', `command exceeds ${COMMAND_LIMIT} characters`);
             }
 
+            // Read off the authenticated request, never off the body: a client-supplied author is
+            // impersonation. Null only when the app was built with no auth store at all, which is
+            // the route tests' configuration rather than a deployment's.
+            const createdBy = callerOf(request)?.user.id ?? null;
+
             const created = await guard(reply, (e) => request.log.error({ err: e }, 'job create failed'), () =>
-                store.create(command),
+                store.create(command, createdBy),
             );
             if (!created.ok) return reply;
             return reply.code(201).send({ id: created.value.id, status: 'queued' });

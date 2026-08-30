@@ -7,11 +7,66 @@ export interface Repo {
     readonly name: string;
 }
 
+/**
+ * How a request names its caller.
+ *
+ * A union rather than a record of optionals, so "half-configured auth" is unrepresentable rather
+ * than merely rejected: there is no value of this type that has a client id and no secret, and no
+ * call site has to re-check. The mode is also an EXPLICIT enum, never inferred from whether a client
+ * id happens to be set — a mode reached by typo is exactly what docs/persistence.md warns about,
+ * where "the service used to have a second, silent behaviour reachable by forgetting DATABASE_URL".
+ */
+export type AuthConfig =
+    | {
+          /**
+           * Every route is open to anyone who can reach the port, as it was before accounts existed.
+           * Kept because four things depend on it — `npm run seed`, `npm run verify:ui`,
+           * `npm run test:jobs` and the route-test harness — and because there is no offline way to
+           * obtain an OAuth client id, so requiring auth would make `git clone && npm run dev`
+           * impossible. Same argument docs/configuration.md already makes for GITHUB_TOKEN.
+           */
+          readonly mode: 'none';
+          readonly ingestToken: string | null;
+      }
+    | {
+          readonly mode: 'github';
+          readonly clientId: string;
+          readonly clientSecret: string;
+          /** Signs the session cookie, so rotating it logs everyone out. */
+          readonly sessionSecret: string;
+          readonly sessionTtlMs: number;
+          /**
+           * Whether the session cookie carries `Secure`.
+           *
+           * Configured rather than derived. Hard-coding it breaks every `http://127.0.0.1` boot;
+           * relying on the browsers that except loopback is a trap, because Chromium does and Safari
+           * does not, so `verify:ui` (which drives Chromium) would pass while a Safari developer
+           * cannot sign in; and deriving it from `X-Forwarded-Proto` requires trusting a header from
+           * anyone.
+           */
+          readonly cookieSecure: boolean;
+          /**
+           * The absolute origin GitHub redirects back to, e.g. `https://factory.example.com`.
+           *
+           * Explicit, never derived from the `Host` header: an attacker-controlled Host would then
+           * choose the `redirect_uri`, which is redirect poisoning.
+           */
+          readonly publicUrl: string;
+          /** A GitHub login made an admin at boot iff the organization has no members at all. */
+          readonly bootstrapAdmin: string | null;
+          readonly ingestToken: string | null;
+          /** Overridable so the browser check can drive a stub. Environment only — see loadAuth. */
+          readonly authorizeUrl: string;
+          readonly tokenUrl: string;
+          readonly userUrl: string;
+      };
+
 export interface AppConfig {
     /**
      * The organization every figure on the page belongs to, and the key every org-owned primary
-     * key leads with. One per deployment: there are no accounts and no memberships, so this is a
-     * constant for the life of the process.
+     * key leads with. One per deployment, and therefore still a constant for the life of the
+     * process: accounts and memberships exist now, but a member's memberships are checked against
+     * this one org rather than selecting between several.
      */
     readonly orgId: string;
     /** Display only, never a key — which is why it has no character rules and the id does. */
@@ -60,6 +115,7 @@ export interface AppConfig {
      * resolved.
      */
     readonly workspaceRoot: string | null;
+    readonly auth: AuthConfig;
 }
 
 // A telemetry read is a local query with no quota to protect, so this floor exists only to stop a
@@ -179,6 +235,122 @@ function checkWorkspaceNames(repos: readonly Repo[]): void {
         }
         seen.set(name, repo.owner);
     }
+}
+
+/**
+ * Long enough that the cookie signature is not the weak link. Fatal rather than padded: a secret
+ * silently stretched to length is a secret nobody chose.
+ */
+const MIN_SESSION_SECRET_LENGTH = 32;
+
+const DEFAULT_SESSION_TTL_HOURS = 24 * 14;
+
+/**
+ * Addresses that are only reachable from the machine itself, which is the entire access control an
+ * `AUTH_MODE=none` deployment has.
+ */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
+function bool(raw: string | undefined, fallback: boolean, label: string): boolean {
+    const value = raw?.trim();
+    if (value === undefined || value === '') return fallback;
+    if (['1', 'true', 'yes'].includes(value)) return true;
+    if (['0', 'false', 'no'].includes(value)) return false;
+    throw new Error(`${label} must be a boolean ("1"/"true" or "0"/"false"), got "${raw}"`);
+}
+
+/**
+ * Every key of `[auth]`, or the one field `none` mode has.
+ *
+ * Pure, like the rest of loadConfig: no I/O, and the GitHub endpoints are read from the environment
+ * rather than reached.
+ */
+function loadAuth(env: NodeJS.ProcessEnv, host: string, port: number): AuthConfig {
+    const ingestToken = env.INGEST_TOKEN?.trim() || null;
+    const mode = env.AUTH_MODE?.trim() || 'none';
+    if (mode !== 'none' && mode !== 'github') {
+        throw new Error(`AUTH_MODE must be "github" or "none", got "${env.AUTH_MODE}"`);
+    }
+
+    if (mode === 'none') {
+        /*
+         * Refusing the pairing is stronger than warning about it: it makes "open to the network"
+         * inexpressible rather than merely discouraged, which is more than docs/security.md
+         * guaranteed when the bind address was the only protection there was.
+         *
+         * The hatch is required, not decorative. docker/Dockerfile sets HOST=0.0.0.0, because inside
+         * a container that is normal and the isolation is compose's `127.0.0.1:8080:8080` publish —
+         * something loadConfig cannot see and must not guess at. So compose sets the hatch, and a
+         * human who sets it has typed the sentence once.
+         */
+        if (!LOOPBACK_HOSTS.has(host) && !bool(env.AUTH_ALLOW_PUBLIC_BIND, false, 'AUTH_ALLOW_PUBLIC_BIND')) {
+            throw new Error(
+                `AUTH_MODE is "none" but HOST is "${host}", which is reachable from off this machine. With no auth every route is open to anyone who can reach the port, including POST /api/jobs, which runs shell commands. Set AUTH_MODE=github, or bind to 127.0.0.1, or set AUTH_ALLOW_PUBLIC_BIND=1 if something else in front of this port is doing the authenticating.`,
+            );
+        }
+        return Object.freeze({ mode, ingestToken });
+    }
+
+    // Named individually rather than as "auth is incomplete": the operator has one key to fix and
+    // should not have to diff the example file to find out which.
+    const clientId = env.GITHUB_OAUTH_CLIENT_ID?.trim();
+    const clientSecret = env.GITHUB_OAUTH_CLIENT_SECRET?.trim();
+    const sessionSecret = env.SESSION_SECRET?.trim();
+    for (const [label, value] of [
+        ['GITHUB_OAUTH_CLIENT_ID', clientId],
+        ['GITHUB_OAUTH_CLIENT_SECRET', clientSecret],
+        ['SESSION_SECRET', sessionSecret],
+    ] as const) {
+        if (!value) {
+            throw new Error(
+                `AUTH_MODE is "github" but ${label} is not set. Half-configured auth is fatal rather than falling back to an open deployment, which would be the one failure nobody notices.`,
+            );
+        }
+    }
+    if (sessionSecret!.length < MIN_SESSION_SECRET_LENGTH) {
+        throw new Error(
+            `SESSION_SECRET must be at least ${MIN_SESSION_SECRET_LENGTH} characters, got ${sessionSecret!.length}`,
+        );
+    }
+
+    // Defaulted only for a loopback bind, where the origin is unambiguous. A deployment reachable
+    // from elsewhere has to say what its origin is, because `http://0.0.0.0:8080` is not a URL any
+    // browser will ever be redirected back to and a wrong one fails at GitHub with an opaque error.
+    const publicUrl = env.PUBLIC_URL?.trim() || (LOOPBACK_HOSTS.has(host) ? `http://${host}:${port}` : '');
+    if (!publicUrl) {
+        throw new Error(
+            `AUTH_MODE is "github" and HOST is "${host}", so PUBLIC_URL must be set: it is the origin GitHub redirects back to, and it cannot be derived from the request's Host header without letting the caller choose the redirect target.`,
+        );
+    }
+    let origin: URL;
+    try {
+        origin = new URL(publicUrl);
+    } catch {
+        throw new Error(`PUBLIC_URL must be an absolute URL, got "${publicUrl}"`);
+    }
+    if (origin.protocol !== 'http:' && origin.protocol !== 'https:') {
+        throw new Error(`PUBLIC_URL must be http or https, got "${publicUrl}"`);
+    }
+
+    const sessionTtlHours = int(env.SESSION_TTL_HOURS, DEFAULT_SESSION_TTL_HOURS, 'SESSION_TTL_HOURS');
+
+    return Object.freeze({
+        mode,
+        clientId: clientId!,
+        clientSecret: clientSecret!,
+        sessionSecret: sessionSecret!,
+        sessionTtlMs: sessionTtlHours * 3600 * 1000,
+        cookieSecure: bool(env.COOKIE_SECURE, false, 'COOKIE_SECURE'),
+        publicUrl: origin.origin,
+        bootstrapAdmin: env.AUTH_BOOTSTRAP_ADMIN?.trim().toLowerCase() || null,
+        ingestToken,
+        // Environment only, and deliberately absent from config-file.ts's KEYS. A configurable
+        // authorize URL in a file that ships with a deployment is a phishing vector; as an
+        // environment variable it stays a test seam that index.ts logs loudly when it is used.
+        authorizeUrl: env.GITHUB_OAUTH_AUTHORIZE_URL?.trim() || 'https://github.com/login/oauth/authorize',
+        tokenUrl: env.GITHUB_OAUTH_TOKEN_URL?.trim() || 'https://github.com/login/oauth/access_token',
+        userUrl: env.GITHUB_OAUTH_USER_URL?.trim() || 'https://api.github.com/user',
+    });
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -303,6 +475,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
               .filter(Boolean)
         : DEFAULT_BOTS;
 
+    // Bound before the return because loadAuth reads both: whether a deployment is reachable from
+    // off the machine is what decides if running without auth is allowed at all.
+    const port = int(env.PORT, 8080, 'PORT');
+    const host = env.HOST ?? '127.0.0.1';
+
     return Object.freeze({
         orgId,
         orgName,
@@ -310,13 +487,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         baseBranch: env.BASE_BRANCH ?? 'dev',
         bots: Object.freeze(bots),
         syncTtlMs: syncTtlSeconds * 1000,
-        port: int(env.PORT, 8080, 'PORT'),
-        host: env.HOST ?? '127.0.0.1',
+        port,
+        host,
         webRoot: env.WEB_ROOT ?? null,
         telemetrySource,
         databaseUrl,
         telemetryTtlMs: telemetryTtlSeconds * 1000,
         repoNames: Object.freeze(repos.map((repo) => `${repo.owner}/${repo.name}`)),
         workspaceRoot,
+        auth: loadAuth(env, host, port),
     });
 }

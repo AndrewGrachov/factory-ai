@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import type { BranchHistory, CanonicalPr, TelemetryInput } from '@factory-ai/core';
 import { buildApp } from '../src/app.js';
-import type { AppConfig } from '../src/config.js';
+import type { GitHubIdentity, GitHubIdentityClient } from '../src/auth/github.js';
+import { SESSION_COOKIE, hashToken, mintToken, sign } from '../src/auth/session.js';
+import type { AuthStore, Caller, Role } from '../src/auth/store.js';
+import type { AppConfig, AuthConfig } from '../src/config.js';
 import type { PrStore, SyncState } from '../src/db/pr-store.js';
 import type { ForgeClient, PullRequestsResult } from '../src/forge.js';
 import { fixturePayload } from '../src/github/fixture-payload.js';
@@ -56,6 +59,30 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         telemetryTtlMs: 30_000,
         repoNames: [TEST_REPO],
         workspaceRoot: null,
+        // Matches loadConfig's default. Note that this is only what the *config* says: the app is
+        // built with no auth store at all unless a test passes one, so by default no hook runs.
+        auth: { mode: 'none', ingestToken: null },
+        ...overrides,
+    };
+}
+
+export const TEST_SESSION_SECRET = 'test-session-secret-of-at-least-32-chars';
+
+/** A github-mode [auth] block, so a test does not have to restate eleven fields to change one. */
+export function githubAuth(overrides: Partial<Extract<AuthConfig, { mode: 'github' }>> = {}): AuthConfig {
+    return {
+        mode: 'github',
+        clientId: 'test-client-id',
+        clientSecret: 'test-client-secret',
+        sessionSecret: TEST_SESSION_SECRET,
+        sessionTtlMs: 14 * 24 * 3600 * 1000,
+        cookieSecure: false,
+        publicUrl: 'http://127.0.0.1:8080',
+        bootstrapAdmin: null,
+        ingestToken: null,
+        authorizeUrl: 'https://github.test/login/oauth/authorize',
+        tokenUrl: 'https://github.test/login/oauth/access_token',
+        userUrl: 'https://api.github.test/user',
         ...overrides,
     };
 }
@@ -246,6 +273,242 @@ export function memoryPrStore(seed: {
     return store;
 }
 
+export interface MemoryAuthStore extends AuthStore {
+    /**
+     * Creates a claimed membership and returns the account, so a test can hold a session without
+     * driving the whole OAuth round trip to get one.
+     */
+    seedMember(orgId: string, login: string, role?: Role): Caller;
+    /**
+     * The stand-in account AUTH_MODE=none resolves, exactly as migrate()'s ensureLocalUser writes
+     * it: github_user_id 0, a value GitHub never issues, and the reserved `__local__` login, which
+     * is unrepresentable as a real GitHub login because underscores are not permitted in one.
+     */
+    seedLocalUser(orgId: string): Caller;
+    /** Every live session's user id, so a test can assert one was created — or was not. */
+    sessions(): string[];
+    seedWorkerToken(orgId: string, name: string, token: string): void;
+}
+
+/**
+ * An in-memory AuthStore, for the same reason memoryPrStore exists: it keeps the offline suite a
+ * no-database suite while still exercising the claim rule, the membership join and the session
+ * lifecycle. The SQL behind it is covered by server/test-db, which needs a container.
+ */
+export function memoryAuthStore(): MemoryAuthStore {
+    interface User {
+        id: string;
+        githubUserId: number;
+        login: string;
+        displayName: string | null;
+    }
+    interface Member {
+        orgId: string;
+        login: string;
+        userId: string | null;
+        role: Role;
+        claimed: boolean;
+    }
+
+    const users: User[] = [];
+    const members: Member[] = [];
+    const sessions = new Map<string, { userId: string; expiresAt: number }>();
+    const workerTokens: { orgId: string; id: string; name: string; hash: string; revoked: boolean }[] = [];
+    let nextId = 1;
+
+    const key = (hash: Buffer) => hash.toString('hex');
+    const callerFor = (user: User, member: Member): Caller => ({
+        user: { id: user.id, githubUserId: user.githubUserId, login: user.login, displayName: user.displayName },
+        role: member.role,
+    });
+    const memberOf = (userId: string, orgId: string): Caller | null => {
+        const member = members.find((m) => m.orgId === orgId && m.userId === userId);
+        const user = users.find((u) => u.id === userId);
+        return member && user ? callerFor(user, member) : null;
+    };
+
+    const store: MemoryAuthStore = {
+        seedMember(orgId, login, role = 'member') {
+            const user: User = {
+                id: `user-${nextId}`,
+                githubUserId: nextId,
+                login: login.toLowerCase(),
+                displayName: login,
+            };
+            nextId += 1;
+            users.push(user);
+            const member: Member = { orgId, login: user.login, userId: user.id, role, claimed: true };
+            members.push(member);
+            return callerFor(user, member);
+        },
+
+        seedLocalUser(orgId) {
+            const user: User = { id: 'user-local', githubUserId: 0, login: '__local__', displayName: 'Local' };
+            users.push(user);
+            const member: Member = {
+                orgId,
+                login: user.login,
+                userId: user.id,
+                role: 'admin',
+                claimed: true,
+            };
+            members.push(member);
+            return callerFor(user, member);
+        },
+
+        sessions: () => [...sessions.values()].map((s) => s.userId),
+
+        seedWorkerToken(orgId, name, token) {
+            workerTokens.push({
+                orgId,
+                id: `worker-${workerTokens.length + 1}`,
+                name,
+                hash: key(hashToken(token)),
+                revoked: false,
+            });
+        },
+
+        async signIn(identity, orgId) {
+            const login = identity.login.toLowerCase();
+            let user = users.find((u) => u.githubUserId === identity.githubUserId);
+            if (user) {
+                // A rename updates the label. It never creates a second account, and it never
+                // detaches the membership already bound to this numeric id.
+                user.login = login;
+                user.displayName = identity.displayName;
+            } else {
+                user = {
+                    id: `user-${nextId}`,
+                    githubUserId: identity.githubUserId,
+                    login,
+                    displayName: identity.displayName,
+                };
+                nextId += 1;
+                users.push(user);
+            }
+
+            for (const member of members) {
+                if (member.login !== login || member.userId !== null) continue;
+                if (members.some((m) => m.orgId === member.orgId && m.userId === user.id)) continue;
+                member.userId = user.id;
+                member.claimed = true;
+            }
+            return memberOf(user.id, orgId);
+        },
+
+        async createSession(tokenHash, userId, expiresAt) {
+            sessions.set(key(tokenHash), { userId, expiresAt: expiresAt.getTime() });
+        },
+
+        async findSession(tokenHash, orgId) {
+            const session = sessions.get(key(tokenHash));
+            if (!session || session.expiresAt <= Date.now()) return null;
+            return memberOf(session.userId, orgId);
+        },
+
+        async deleteSession(tokenHash) {
+            sessions.delete(key(tokenHash));
+        },
+
+        async localCaller(orgId) {
+            const user = users.find((u) => u.githubUserId === 0);
+            return user ? memberOf(user.id, orgId) : null;
+        },
+
+        async findWorkerToken(tokenHash) {
+            const found = workerTokens.find((t) => t.hash === key(tokenHash) && !t.revoked);
+            return found ? { orgId: found.orgId, id: found.id, name: found.name } : null;
+        },
+
+        async invite(orgId, login, role) {
+            const normalised = login.toLowerCase();
+            const held = members.find((m) => m.orgId === orgId && m.login === normalised);
+            if (held) {
+                held.role = role;
+                return 'updated';
+            }
+            members.push({ orgId, login: normalised, userId: null, role, claimed: false });
+            return 'created';
+        },
+
+        async removeMember(orgId, login) {
+            const normalised = login.toLowerCase();
+            const index = members.findIndex((m) => m.orgId === orgId && m.login === normalised);
+            if (index === -1) return 'missing';
+            const [removed] = members.splice(index, 1);
+            for (const [hash, session] of sessions) {
+                if (session.userId === removed!.userId) sessions.delete(hash);
+            }
+            return 'removed';
+        },
+
+        async listMembers(orgId) {
+            return members
+                .filter((m) => m.orgId === orgId)
+                .map((m) => ({ login: m.login, role: m.role, claimed: m.claimed }));
+        },
+
+        async createWorkerToken(orgId, name, tokenHash) {
+            const id = `worker-${workerTokens.length + 1}`;
+            workerTokens.push({ orgId, id, name, hash: key(tokenHash), revoked: false });
+            return { id };
+        },
+
+        async revokeWorkerToken(orgId, name) {
+            const found = workerTokens.find((t) => t.orgId === orgId && t.name === name && !t.revoked);
+            if (!found) return 'missing';
+            found.revoked = true;
+            return 'revoked';
+        },
+
+        async listWorkerTokens(orgId) {
+            return workerTokens
+                .filter((t) => t.orgId === orgId)
+                .map((t) => ({ name: t.name, createdAt: '2026-08-21T12:00:00.000Z', revoked: t.revoked }));
+        },
+    };
+    return store;
+}
+
+/** Mints a live session for `caller` and returns the Cookie header that presents it. */
+export async function signedIn(
+    store: AuthStore,
+    caller: Caller,
+    secret = TEST_SESSION_SECRET,
+): Promise<string> {
+    const token = mintToken();
+    await store.createSession(hashToken(token), caller.user.id, new Date(Date.now() + 3600_000));
+    return `${SESSION_COOKIE}=${sign(token, secret)}`;
+}
+
+export interface IdentityStub extends GitHubIdentityClient {
+    /** What the next exchange resolves to. Set per test. */
+    next: GitHubIdentity;
+    exchanges: string[];
+}
+
+export function stubIdentityClient(identity?: Partial<GitHubIdentity>): IdentityStub {
+    const stub: IdentityStub = {
+        next: {
+            githubUserId: 4242,
+            login: 'octocat',
+            displayName: 'The Octocat',
+            avatarUrl: null,
+            ...identity,
+        },
+        exchanges: [],
+        authorizeUrl: (state) => `https://github.test/login/oauth/authorize?state=${state}`,
+        async exchange(code) {
+            stub.exchanges.push(code);
+            return `access-for-${code}`;
+        },
+        async identity() {
+            return stub.next;
+        },
+    };
+    return stub;
+}
+
 export interface TelemetryStubOptions {
     rollups?: () => Promise<TelemetryInput>;
     health?: () => Promise<TelemetryHealth>;
@@ -287,6 +550,14 @@ export async function harness(options: {
      * suite stays offline. Tests that care about what is already stored pass a seeded one.
      */
     store?: PrStore;
+    /**
+     * Absent by default, which builds the app with NO auth at all — no hook, no /api/auth routes.
+     *
+     * That default is what lets the seventeen route-test files written before accounts existed keep
+     * driving `app.inject()` with no cookie. A test that is about auth passes a store explicitly.
+     */
+    auth?: AuthStore;
+    identity?: GitHubIdentityClient;
 }) {
     const config = testConfig(options.config);
     const telemetry = options.telemetry ?? stubTelemetryClient();
@@ -298,7 +569,13 @@ export async function harness(options: {
         store: options.store ?? memoryPrStore(),
         now: () => clock,
     });
-    const app = await buildApp({ config, service, now: () => clock });
+    const app = await buildApp({
+        config,
+        service,
+        auth: options.auth,
+        identity: options.identity,
+        now: () => clock,
+    });
     return {
         app,
         service,

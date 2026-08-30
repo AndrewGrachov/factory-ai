@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DateRange, OrganizationMeta, Stats, TelemetryStats } from '@factory-ai/core';
+import { reportUnauthenticated } from './useSession.js';
 
 export interface RateLimit {
     remaining: number;
@@ -88,6 +89,17 @@ export function useStats(query = 'range=all'): UseStats {
                 setProgress(body.fetch);
                 setPending(true);
                 timer.current = window.setTimeout(() => void poll(signal), POLL_MS);
+                return;
+            }
+
+            // Its own branch, ahead of the generic one below. This poll runs every two seconds for
+            // as long as the tab is open, so a session expiring mid-poll is guaranteed rather than
+            // exceptional — and in the generic branch it renders a banner that never clears, because
+            // every subsequent poll 401s too. Handing it to the gate is the only thing that can
+            // actually resolve it.
+            if (response.status === 401) {
+                reportUnauthenticated();
+                setPending(false);
                 return;
             }
 

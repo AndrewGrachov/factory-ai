@@ -12,6 +12,7 @@ of decisions that look like cruft and are not, and most are guarded by a test th
 | Data flow, forge adapters, `server/src/index.ts` wiring, fixtures | [docs/architecture.md](docs/architecture.md) |
 | `core/src/metrics.ts`, `canonical.ts`, the GraphQL query, cache/TTL constants | [docs/metrics.md](docs/metrics.md) |
 | Anything named `org_id`, `005_organizations.sql`, the org selector | [docs/organizations.md](docs/organizations.md) |
+| `server/src/auth/*`, `010_auth.sql`, the session cookie, the worker token, which routes need a credential | [docs/auth.md](docs/auth.md) |
 | `attribute()` keys, `004_pull_requests.sql` keys, per-repo rendering | [docs/repos.md](docs/repos.md) |
 | `config.ts`, `config-file.ts`, compose env blocks, `factory.toml` | [docs/configuration.md](docs/configuration.md) |
 | `server/src/workspace/*`, `ORG_WORKSPACE_ROOT`, the `git` install in the runtime image | [docs/workspace.md](docs/workspace.md) |
@@ -51,6 +52,10 @@ npm run typecheck      # tsc -b across all four project references
 # 8123 and walks every date range. Still offline — no token, no quota, no network — but by way of
 # a seeded database rather than a replayed payload. Screenshots to artifacts/ui/ — read them; a
 # passing assertion says the DOM was right, only the image says the layout was.
+#
+# Two projects, two servers. `chromium` is the open board on 8123 and is the visual check; `auth`
+# is a second board on 8124 with AUTH_MODE=github pointed at e2e/stub-idp.mjs, which drives a real
+# sign-in round trip offline. Needs factory_e2e AND factory_auth_e2e to exist.
 npm run verify:ui      # needs: a running timescale, and `npx playwright install chromium` once
 
 # Fill a disposable database with synthetic PRs, base-branch history and agent sessions. Refuses
@@ -76,6 +81,17 @@ DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_test npm run test
 # images that echo and exit, which is what makes the whole path assertable offline. Everything it
 # creates it drops. Needs docker and a free 8129.
 npm run test:jobs
+
+# Accounts. AUTH_MODE defaults to `none`, where every route is open and the bind address is the
+# access control, exactly as before. With AUTH_MODE=github somebody has to be invited before they
+# can sign in — and after 010 an existing database has nobody in it, which presents as "auth is
+# broken" rather than "nobody has been invited". auth.bootstrap_admin covers the first person.
+npm run invite -- --login <github-login> [--role admin|member] [--remove]
+npm run invite -- --list
+
+# The driver's credential, printed once — only its hash is stored. A CLI and not a route, because it
+# issues something that claims work and reports results with no human anywhere.
+npm run worker-token -- --name driver-1 [--revoke]
 
 # Import history from ~/.claude/projects/*/*.jsonl. Idempotent; safe to re-run.
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_dev npm run backfill

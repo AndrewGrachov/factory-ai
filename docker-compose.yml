@@ -49,6 +49,25 @@ services:
             # the container at it would silently split history across two.
             DATABASE_URL: postgres://factory:factory@timescale:5432/factory_dev
             FACTORY_CONFIG: ${FACTORY_CONFIG:-}
+            # Empty-defaulted, like the ORG_* three and for the same reason: a mounted
+            # factory.toml's [auth] must win, and AUTH_MODE in particular decides whether the port
+            # is open. See docs/auth.md.
+            AUTH_MODE: ${AUTH_MODE:-}
+            GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+            GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+            SESSION_SECRET: ${SESSION_SECRET:-}
+            PUBLIC_URL: ${PUBLIC_URL:-}
+            COOKIE_SECURE: ${COOKIE_SECURE:-}
+            AUTH_BOOTSTRAP_ADMIN: ${AUTH_BOOTSTRAP_ADMIN:-}
+            INGEST_TOKEN: ${INGEST_TOKEN:-}
+            # A literal, and REQUIRED here rather than optional. The Dockerfile sets HOST=0.0.0.0,
+            # so with AUTH_MODE unset (the default, meaning no auth at all) loadConfig would refuse
+            # to boot: an open deployment on an address reachable from off the machine is a
+            # combination it makes inexpressible rather than merely warns about. Inside a container
+            # 0.0.0.0 is normal and the isolation is the `127.0.0.1:8080:8080` publish above —
+            # something loadConfig cannot see and must not guess at. This line is that assertion.
+            # If you publish this port on a routable address, set AUTH_MODE=github.
+            AUTH_ALLOW_PUBLIC_BIND: '1'
         volumes:
             # The checkouts ORG_WORKSPACE_ROOT points at. Mounted unconditionally, unlike the
             # factory.toml below: a named volume is created on demand, so there is no missing
@@ -98,6 +117,10 @@ services:
             dockerfile: docker/driver.Dockerfile
         environment:
             JOB_BOARD_URL: http://dashboard:8080
+            # The worker token, from `npm run worker-token -- --name driver-1`. Only needed when the
+            # dashboard runs AUTH_MODE=github; against an open board it stays empty and the header
+            # is omitted entirely rather than sent blank.
+            JOB_BOARD_TOKEN: ${JOB_BOARD_TOKEN:-}
             # Only used to build the runner's WORKDIR, /workspaces/<org>. Empty-defaulted like the
             # dashboard's, so a mounted factory.toml's organization still decides — but note the
             # driver reads no config file, so an org set ONLY in factory.toml needs setting here.

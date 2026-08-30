@@ -17,6 +17,7 @@
  * reason, which is that the failure leaves no trace to notice later.
  */
 import postgres from 'postgres';
+import { createAuthStore } from '../auth/store.js';
 import { resolveConfig } from '../config-file.js';
 import { migrate } from '../db/migrate.js';
 import { createPrStore } from '../db/pr-store.js';
@@ -60,7 +61,21 @@ const data = generate({ repo, baseBranch: config.baseBranch, now });
 const sql = postgres(config.databaseUrl, { max: 4 });
 try {
     console.log(`[seed] organization ${config.orgName} (${config.orgId})`);
-    await migrate(sql, { orgId: config.orgId, attempts: 5, log: (m) => console.log(`[migrate] ${m}`) });
+    await migrate(sql, {
+        orgId: config.orgId,
+        orgName: config.orgName,
+        attempts: 5,
+        log: (m) => console.log(`[migrate] ${m}`),
+    });
+
+    // An unclaimed invite, so the browser check can drive a real sign-in against a stub identity
+    // provider. Only the invite, never the account: binding one here would skip the claim, which is
+    // the half of sign-in most worth exercising in a browser.
+    const invited = process.env.SEED_INVITE_LOGIN?.trim();
+    if (invited) {
+        await createAuthStore({ sql }).invite(config.orgId, invited, 'admin');
+        console.log(`[seed] invited ${invited} to ${config.orgId} as admin`);
+    }
 
     const store = createPrStore({ sql, orgId: config.orgId });
     await store.savePullRequests(data.prs);

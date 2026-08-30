@@ -15,7 +15,8 @@ unauthenticated, and a socket on that process would make it root on the host.
 
 ```
 POST /api/jobs/claim {worker}   -> 200 {id, command, leaseToken, leaseExpiresAt,
-                                        resumeSessionId} | 204
+                                        userId, resumeSessionId} | 204
+  every request carries `authorization: Bearer $JOB_BOARD_TOKEN`, when the board requires one
   resumeSessionId ? restore that session : mint one, POST /api/jobs/:id/session
   spawn claude-executor with the command, as that session
   POST /api/jobs/:id/heartbeat {leaseToken}     every leaseSeconds/3, while it runs
@@ -45,6 +46,7 @@ docker compose --profile driver up -d driver             # or in the stack
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `JOB_BOARD_URL` | `http://127.0.0.1:8080` | Must be http(s); the scheme is checked, because `new URL('dashboard:8080')` parses. |
+| `JOB_BOARD_TOKEN` | unset | The worker token, from `npm run worker-token -- --name <worker>`. Required against a board running `AUTH_MODE=github`; unset against an open one, where the header is **omitted rather than sent empty** — an empty Bearer is a credential that failed, not one that was never offered. It is also how the board knows which organization this driver works for. |
 | `ORG_ID` | `default` | Only builds the runner's `WORKDIR`. The driver reads no `factory.toml`, so an org set only in the file must be set here too. |
 | `EXECUTOR_IMAGE` | `claude-executor` | |
 | `WORKSPACE_VOLUME` | `factory-ai_workspaces` | A volume **name**, not a host path — see below. |
@@ -262,7 +264,14 @@ timestamp and FIFO without the id tiebreaker is arbitrary.
 - **One auth volume, shared by every concurrent Remote Control runner.** They all write
   `.claude.json` in the same directory. Fine for one drivable job at a time and unexamined beyond
   that; a volume per job would make the login a template to copy rather than a mount.
-- **No auth** — see [security.md](security.md), which is where the consequence is written down.
+- **No per-job authorization.** There is authentication now — see [auth.md](auth.md) — and the two
+  credentials are disjoint: a session cookie queues, resumes and reads, a `Bearer fwt_…` worker token
+  claims, heartbeats, suspends and completes. A session on `/claim` would let any member take work
+  away from the driver running it; a worker token on `POST /api/jobs` would produce a job with no
+  author. But **membership is not a sandbox**: every member can queue a command that runs against the
+  org's checkouts, and `job.created_by` records who did rather than limiting what they may do.
+  Under `AUTH_MODE=none` all of it is open, including the worker routes — see [security.md](security.md),
+  which is where the consequence is written down.
 
 ## Testing
 

@@ -4,6 +4,8 @@ import { loadDriverConfig, type DriverConfig } from '../src/config.js';
 import type { RunOutcome, RunSession, Runner } from '../src/docker.js';
 import { createLoop, type Loop } from '../src/loop.js';
 
+const USER = '44444444-4444-4444-8444-444444444444';
+
 const job = (n: number, resumeSessionId: string | null = null): BoardJob => ({
     id: `0000000${n}-1111-4111-8111-111111111111`,
     command: `job ${n}`,
@@ -11,6 +13,8 @@ const job = (n: number, resumeSessionId: string | null = null): BoardJob => ({
     leaseToken: `0000000${n}-2222-4222-8222-222222222222`,
     leaseExpiresAt: '2026-08-29T12:05:00.000Z',
     resumeSessionId,
+    userId: USER,
+    workspacePath: `bellows/${USER}`,
 });
 
 interface BoardStub extends Board {

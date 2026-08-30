@@ -7,7 +7,7 @@ describe('the driver config', () => {
 
         expect(config).toMatchObject({
             boardUrl: 'http://127.0.0.1:8080',
-            orgId: 'default',
+            // No orgId. It only ever built the runner's WORKDIR, and the board sends that path now.
             image: 'claude-executor',
             workspaceVolume: 'factory-ai_workspaces',
             workspaceMount: '/workspaces',

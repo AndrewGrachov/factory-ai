@@ -399,19 +399,40 @@ describe.runIf(enabled)('attribution', () => {
         expect((await store.get(id))?.createdBy).toBe(userId);
     });
 
-    it('reports the author to the worker that claims it', async () => {
-        // The seam the per-user credential work reads. It has no other consumer yet, which is
-        // exactly why it needs a test now rather than later.
+    it('reports the author and their workspace to the worker that claims it', async () => {
         const userId = await account(5002, 'octodog');
         await store.create('echo hi', userId);
 
-        expect((await store.claim('driver-1', 300))?.userId).toBe(userId);
+        const claim = await store.claim('driver-1', 300);
+        // `userId` is still the seam the per-user credential work will read; `workspacePath` is
+        // what the workspace half of it turned into, and the driver runs the job there.
+        expect(claim?.userId).toBe(userId);
+        expect(claim?.workspacePath).toBe(`${ORG}/${userId}`);
     });
 
     it('claims an unattributed job with a null author rather than refusing it', async () => {
         // Every job written before this migration is in this state, and they must still run.
         await queue('echo hi');
-        expect((await store.claim('driver-1', 300))?.userId).toBeNull();
+        const claim = await store.claim('driver-1', 300);
+        expect(claim?.userId).toBeNull();
+        // No member, so no workspace. The driver fails such a job rather than choosing a directory.
+        expect(claim?.workspacePath).toBeNull();
+    });
+
+    it('reports no workspace path when the deployment has no workspace root', async () => {
+        /*
+         * Naming a directory that was never created would be worse than saying nothing: `docker
+         * run -w` CREATES a missing workdir, so the runner would start in an empty directory and
+         * the job would look like it ran. The driver's null check only catches that if the board
+         * is honest here.
+         */
+        const rootless = createJobStore({ sql, orgId: ORG, hasWorkspaces: false });
+        const userId = await account(5004, 'nowhere');
+        await rootless.create('echo hi', userId);
+
+        const claim = await rootless.claim('driver-1', 300);
+        expect(claim?.userId).toBe(userId);
+        expect(claim?.workspacePath).toBeNull();
     });
 
     it('keeps the job when the account that queued it is deleted', async () => {

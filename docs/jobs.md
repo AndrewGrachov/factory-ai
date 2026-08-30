@@ -7,7 +7,7 @@ A job is a text command waiting for a worker — read as a Claude prompt, since 
 `ENTRYPOINT` is the `claude` wrapper and the driver passes the command as `-p <command>`.
 
 **The server hands jobs out and records results. It never spawns anything.** The driver claims a
-job, runs it in a `claude-executor` container against the org's workspace checkout, and reports
+job, runs it in a `claude-executor` container against the AUTHOR's workspace checkout, and reports
 back. The docker socket lives with the driver, never with the dashboard: the dashboard's port is
 unauthenticated, and a socket on that process would make it root on the host.
 
@@ -15,7 +15,7 @@ unauthenticated, and a socket on that process would make it root on the host.
 
 ```
 POST /api/jobs/claim {worker}   -> 200 {id, command, leaseToken, leaseExpiresAt,
-                                        userId, resumeSessionId} | 204
+                                        userId, workspacePath, resumeSessionId} | 204
   every request carries `authorization: Bearer $JOB_BOARD_TOKEN`, when the board requires one
   resumeSessionId ? restore that session : mint one, POST /api/jobs/:id/session
   spawn claude-executor with the command, as that session
@@ -47,7 +47,6 @@ docker compose --profile driver up -d driver             # or in the stack
 | --- | --- | --- |
 | `JOB_BOARD_URL` | `http://127.0.0.1:8080` | Must be http(s); the scheme is checked, because `new URL('dashboard:8080')` parses. |
 | `JOB_BOARD_TOKEN` | unset | The worker token, from `npm run worker-token -- --name <worker>`. Required against a board running `AUTH_MODE=github`; unset against an open one, where the header is **omitted rather than sent empty** — an empty Bearer is a credential that failed, not one that was never offered. It is also how the board knows which organization this driver works for. |
-| `ORG_ID` | `default` | Only builds the runner's `WORKDIR`. The driver reads no `factory.toml`, so an org set only in the file must be set here too. |
 | `EXECUTOR_IMAGE` | `claude-executor` | |
 | `WORKSPACE_VOLUME` | `factory-ai_workspaces` | A volume **name**, not a host path — see below. |
 | `RUNNER_NETWORK` | unset | Join the compose network or the runner's telemetry reaches nothing. |
@@ -66,13 +65,31 @@ children: it talks to the host's daemon over a socket, so a path inside the driv
 nothing to that daemon, and there is no host path to give either — the dashboard writes its
 checkouts into a named volume precisely to avoid one.
 
+**`WORKDIR` comes from the board, not from the driver's configuration.** The claim carries
+`workspacePath` — a root-relative `<orgId>/<userId>` — and the runner starts at
+`<workspaceMount>/<that>`. `ORG_ID` used to live in this table and build `<mount>/<orgId>`, one tree
+that every member's agent shared. Checkouts are per member now, so only the board knows where a
+given job's tree is: it is the thing that created the directory. Each side owns what it knows — the
+board owns the layout, the driver owns the mount point — which is also why the field is a
+ready-made relative path rather than a raw user id the driver would have to interpret.
+
+- **A null `workspacePath` fails the job, with a reason, rather than falling back.** There is no
+  safe fallback left: both `<mount>` and `<mount>/<orgId>` are the *parent* of every member's tree,
+  and handing either to a container that may be running `--dangerously-skip-permissions` is a
+  cross-tenant read. Failing it also drives the job to a terminal state somebody can see, instead of
+  leaving it to be reclaimed on every lease expiry forever.
+- **The driver re-asserts `^<org>/<uuid>$` before interpolating it.** A board is not something this
+  process trusts with a fragment of a shell command — the rule `remoteSessionArgs` already applies
+  to a session id — and here a `..` would point at everybody's checkouts. The pattern is **copied**
+  from the server rather than imported: this package depends on nothing, deliberately.
+
 **Credentials are passed as `-e NAME`, never `-e NAME=value`.** The value then comes from the
 driver's own environment instead of a `docker run` argv that every `ps` on the host can read. This
 is the same distinction the workspace reconcile makes for the git token.
 
 **`RUNNER_SKIP_PERMISSIONS` is a real decision, not a nuisance flag.** Off, a headless agent stalls
 at permission prompts nobody can answer and the job burns its timeout. On, it edits and runs
-whatever it likes inside the container — which is also mounted onto the org's checkouts. It stays
+whatever it likes inside the container — which is also mounted onto that member's checkouts. It stays
 off by default so that turning it on is something somebody typed.
 
 **A run that never started is not a failed job.** If `docker` is missing or the daemon refuses, the
@@ -269,7 +286,7 @@ timestamp and FIFO without the id tiebreaker is arbitrary.
   claims, heartbeats, suspends and completes. A session on `/claim` would let any member take work
   away from the driver running it; a worker token on `POST /api/jobs` would produce a job with no
   author. But **membership is not a sandbox**: every member can queue a command that runs against the
-  org's checkouts, and `job.created_by` records who did rather than limiting what they may do.
+  their own checkouts, and `job.created_by` records who did rather than limiting what they may do.
   Under `AUTH_MODE=none` all of it is open, including the worker routes — see [security.md](security.md),
   which is where the consequence is written down.
 
@@ -303,7 +320,7 @@ Two things it does that are not decoration:
   hands the claim a different job than the one under test — which reads as a broken lease rather
   than a dirty fixture. That misdiagnosis cost real time the first time this script ran.
 - **It starts the board with an empty `factory.toml`.** The repo's own config would otherwise reach
-  the run: its token makes `loadConfig` refuse a `*_test` database outright, and its
+  the run: its App credentials make `loadConfig` refuse a `*_test` database outright, and its
   `workspace_root` starts cloning repositories.
 
 The reclaim and fencing checks age `lease_expires_at` with `psql` rather than waiting a lease out,

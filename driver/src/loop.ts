@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Board, BoardJob } from './board.js';
 import type { DriverConfig } from './config.js';
+import { workspacePathOf } from './docker.js';
 import type { RunSession, Runner } from './docker.js';
 
 export interface Loop {
@@ -223,6 +224,31 @@ export function createLoop({ board, runner, config, log = () => {}, sleep = wait
                     await sleep(config.pollMs);
                     continue;
                 }
+
+                /*
+                 * A job whose author has no workspace is FAILED, never run in a fallback location.
+                 *
+                 * There is no safe fallback left. Checkouts are per member now, so both `<mount>`
+                 * and `<mount>/<org>` are the parent of everybody's tree — handing either to a
+                 * container that may be running --dangerously-skip-permissions would let one
+                 * member's job read and edit another's working copy.
+                 *
+                 * Reported with a reason rather than dropped, so the job reaches a terminal state
+                 * somebody can see instead of being reclaimed on every lease expiry forever.
+                 */
+                if (!workspacePathOf(job)) {
+                    log(`job ${job.id}: no workspace for its author, failing`);
+                    await board
+                        .complete(job, {
+                            status: 'failed',
+                            exitCode: null,
+                            output:
+                                'This job has no workspace. It was queued by an account this board cannot resolve a checkout directory for, or the board has no workspace root configured.',
+                        })
+                        .catch((e: Error) => log(`job ${job.id}: could not report the failure: ${e.message}`));
+                    continue;
+                }
+
                 track(job);
             }
 

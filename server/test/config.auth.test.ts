@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 
-const BASE = { DATABASE_URL: 'postgres://factory:factory@127.0.0.1:5432/factory_dev' };
+// GITHUB_MODE is spelled out because it defaults to `app`, which is fatal without an App id and a
+// private key. That default is deliberate — see config.github.test.ts — and it means every harness
+// that is not about the repo-read credential has to say it is not using one.
+const BASE = {
+    DATABASE_URL: 'postgres://factory:factory@127.0.0.1:5432/factory_dev',
+    GITHUB_MODE: 'none',
+};
 const SECRET = 'a-secret-that-is-at-least-32-characters';
 
 const load = (env: NodeJS.ProcessEnv) => loadConfig({ ...BASE, ...env });

@@ -12,6 +12,8 @@ afterEach(async () => {
 const NOW = Date.parse('2026-08-21T12:00:00.000Z');
 const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
 const DAY = 86_400_000;
+/** Just past the one-minute-per-repo sync floor, with one repo measured. */
+const STALE = 60_010;
 
 async function run(store: ReturnType<typeof memoryPrStore>, client: ReturnType<typeof stubClient>) {
     const h = await harness({ client, store });
@@ -55,15 +57,19 @@ describe('the incremental cutoff', () => {
             },
         });
         const client = stubClient();
-        const h = await harness({ client, store, config: { syncTtlMs: 1 } });
+        // Aged past the slot's TTL rather than configuring a 1ms one. The service floors the
+        // configured TTL at one minute per measured repo — the rate-limit protection that used to
+        // live in loadConfig, and could not stay there once the repo count came from GitHub — so a
+        // 1ms TTL is not something a running process can have.
+        const h = await harness({ client, store });
         app = h.app;
         await h.service.prime();
-        h.advance(10);
+        h.advance(STALE);
         await app.inject({ method: 'GET', url: '/api/stats' });
         await h.settle();
 
-        // The floor is read off the clock at sync time, which the harness advanced by 10ms.
-        expect(client.lastCutoff?.[TEST_REPO]).toBe(at(10 - 14 * DAY));
+        // The floor is read off the clock at sync time, which the harness advanced.
+        expect(client.lastCutoff?.[TEST_REPO]).toBe(at(STALE - 14 * DAY));
     });
 
     it('is floored by the oldest still-open PR', async () => {
@@ -77,10 +83,14 @@ describe('the incremental cutoff', () => {
             },
         });
         const client = stubClient();
-        const h = await harness({ client, store, config: { syncTtlMs: 1 } });
+        // Aged past the slot's TTL rather than configuring a 1ms one. The service floors the
+        // configured TTL at one minute per measured repo — the rate-limit protection that used to
+        // live in loadConfig, and could not stay there once the repo count came from GitHub — so a
+        // 1ms TTL is not something a running process can have.
+        const h = await harness({ client, store });
         app = h.app;
         await h.service.prime();
-        h.advance(10);
+        h.advance(STALE);
         await app.inject({ method: 'GET', url: '/api/stats' });
         await h.settle();
 

@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { createUserResolver } from '../auth/plugin.js';
 import type { GitHubIdentityClient } from '../auth/github.js';
+import { ensureUserWorkspace } from '../workspace/provision.js';
 import {
     OAUTH_COOKIE,
     SESSION_COOKIE,
@@ -115,6 +116,32 @@ export const authRoutes =
             // its own reason, because "your login failed" and "you are not a member of this
             // organization" send the reader to completely different places.
             if (!caller) return reply.redirect(failure(returnTo, 'no_membership'), 302);
+
+            /*
+             * The workspace directory, and only the directory.
+             *
+             * A `mkdir` is microseconds, so signing in can afford it; a clone is minutes, so signing
+             * in cannot, and nothing is cloned until this person picks repositories. A member who
+             * signs in once and never returns therefore costs an empty directory and nothing else.
+             *
+             * A failure here must not block the sign-in: the workspace is one feature of the
+             * dashboard, and a full disk should not turn into "you cannot log in". GET
+             * /api/workspace calls the same function, so a session that got here without one
+             * recovers on its first visit to the page.
+             */
+            try {
+                ensureUserWorkspace({
+                    root: config.workspaceRoot,
+                    orgId: config.orgId,
+                    userId: caller.user.id,
+                    login: caller.user.login,
+                    githubUserId: caller.user.githubUserId,
+                    // The one moment a GitHub rename can have happened since the last visit.
+                    rewriteBreadcrumb: true,
+                });
+            } catch (e) {
+                request.log.error({ err: e }, 'workspace provisioning failed');
+            }
 
             const token = mintToken();
             // The cookie's Max-Age and the row's expires_at describe the same instant: the first

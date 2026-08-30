@@ -21,10 +21,11 @@ import type {
     TruncatedPr,
 } from '@factory-ai/core';
 import { createCache } from './cache.js';
-import type { AppConfig } from './config.js';
+import { MIN_SYNC_TTL_SECONDS_PER_REPO, type AppConfig } from './config.js';
 import { SCHEMA_EPOCH, type PrStore, type SyncState } from './db/pr-store.js';
 import type { ForgeClient, Progress, RateLimit, SyncMode } from './forge.js';
 import { GitHubError } from './github/errors.js';
+import type { RepoSource } from './github/repo-source.js';
 import type { TelemetryClient } from './telemetry/client.js';
 import { TelemetryError } from './telemetry/errors.js';
 
@@ -157,6 +158,11 @@ export interface StatsService {
 export interface StatsServiceDeps {
     config: AppConfig;
     client: ForgeClient;
+    /**
+     * Which repositories this organization measures. Was `config.repos`; it is a dependency now
+     * because the answer comes from the GitHub App installation and is therefore a network read.
+     */
+    repos: RepoSource;
     telemetry: TelemetryClient;
     /**
      * Required. Every figure on the page is read back out of it, so there is no configuration in
@@ -239,12 +245,34 @@ function toJoinKey(pr: DerivedPr): PrTelemetryKey {
 export function createStatsService({
     config,
     client,
+    repos,
     telemetry,
     store,
     now = Date.now,
 }: StatsServiceDeps): StatsService {
     const bots = new Set(config.bots);
-    const repoNames = config.repoNames;
+
+    /**
+     * The measured repos, as "owner/name" — the form stamped onto every stored PR.
+     *
+     * A function over the source's snapshot rather than a bound array, because the list can change
+     * under the process now: somebody grants the App another repository and it appears without a
+     * restart. Every async path calls `repos.list()` first, which is what refreshes the snapshot
+     * this reads; `current()` deliberately does not, because it is synchronous and must stay a
+     * pure re-aggregation of an already-fetched payload.
+     */
+    const repoNames = (): readonly string[] => repos.snapshotNames();
+
+    /**
+     * SYNC_TTL_SECONDS floored by the repo count, which loadConfig could not do: it does not know
+     * the count. An incremental sync costs a few rate-limit points per repo, so a fixed 60s slot
+     * across fifty repositories is a very different draw on the budget than across one.
+     */
+    const syncTtlMs = (): number =>
+        // `snapshot()` rather than `snapshotNames()`: this needs the count, and the latter maps the
+        // whole list into a new array of strings. It is called from `isStale()`, which runs on
+        // every request.
+        Math.max(config.syncTtlMs, MIN_SYNC_TTL_SECONDS_PER_REPO * 1000 * Math.max(1, repos.snapshot().length));
     // Frozen once: with no accounts there is nothing that could change it mid-process, and one
     // object shared by `current` and `available` makes their equality structural rather than
     // coincidental.
@@ -304,15 +332,15 @@ export function createStatsService({
     }
 
     function chooseMode(state: Record<string, SyncState>): SyncMode {
-        const missing = repoNames.filter((repo) => !state[repo]?.watermarkAt);
+        const missing = repoNames().filter((repo) => !state[repo]?.watermarkAt);
         // A repo with no watermark has never completed a walk, so there is nothing to be
         // incremental about.
         if (missing.length) return 'full';
 
         // A newly selected field leaves existing rows null, and only a full walk repairs them.
-        if (repoNames.some((repo) => (state[repo]?.syncedEpoch ?? 0) < SCHEMA_EPOCH)) return 'full';
+        if (repoNames().some((repo) => (state[repo]?.syncedEpoch ?? 0) < SCHEMA_EPOCH)) return 'full';
 
-        const due = repoNames.some((repo) => {
+        const due = repoNames().some((repo) => {
             const at = state[repo]?.lastFullAt;
             return !at || now() - new Date(at).getTime() > FULL_RESYNC_INTERVAL_MS;
         });
@@ -321,10 +349,10 @@ export function createStatsService({
         // A reconciliation that is due but unaffordable stays a want, not an attempt. This reads
         // the actual remaining budget rather than inferring it from a clock, which is why the
         // slot TTL does not need to gate the expensive path.
-        const remaining = repoNames
+        const remaining = repoNames()
             .map((repo) => state[repo]?.lastRateLimit?.remaining)
             .filter((n): n is number => typeof n === 'number');
-        const needed = FULL_WALK_POINTS_PER_REPO * repoNames.length * 1.5;
+        const needed = FULL_WALK_POINTS_PER_REPO * repoNames().length * 1.5;
         if (remaining.length && Math.min(...remaining) < needed) return 'incremental';
 
         return 'full';
@@ -336,7 +364,7 @@ export function createStatsService({
     ): Record<string, string> {
         const floor = now() - RECENT_WINDOW_MS;
         const cutoff: Record<string, string> = {};
-        for (const repo of repoNames) {
+        for (const repo of repoNames()) {
             const watermark = state[repo]?.watermarkAt;
             if (!watermark) continue;
             const candidates = [
@@ -354,11 +382,26 @@ export function createStatsService({
         // 'loading' rather than 'idle' — that is what makes the cold-start 202 honest.
         fetchState = { ...idleState(), state: 'loading', startedAt: new Date(now()).toISOString() };
 
+        // Before anything reads `repoNames()`. Every step below is scoped to the repo list, so a
+        // stale one silently syncs the wrong set — including skipping a repository somebody granted
+        // the App five minutes ago, which is the workflow this replaced ORG_REPOS to enable.
+        const measured = await repos.list();
+        if (!measured.length && repos.lastError()) {
+            // Thrown rather than treated as "no repositories". An empty list because the App is not
+            // installed anywhere is a real state the page should show; an empty list because the
+            // call failed is a failure, and reporting a successful sync of nothing would move every
+            // watermark for a walk that never happened.
+            throw new GitHubError(
+                `The GitHub App installation's repository list is unavailable, so there is nothing to scope a sync to: ${repos.lastError()}`,
+                'REPO_LIST',
+            );
+        }
+
         const previous = cache.peek()?.value ?? null;
         const syncState =
-            (await tryStore('read sync state', (s) => s.readSyncState(client.provider, repoNames, PR_KIND))) ?? {};
+            (await tryStore('read sync state', (s) => s.readSyncState(client.provider, repoNames(), PR_KIND))) ?? {};
         const oldestOpen =
-            (await tryStore('read open PRs', (s) => s.oldestOpenUpdatedAt(client.provider, repoNames))) ?? {};
+            (await tryStore('read open PRs', (s) => s.oldestOpenUpdatedAt(client.provider, repoNames()))) ?? {};
         const mode = chooseMode(syncState);
         fetchState = { ...fetchState, mode };
 
@@ -382,7 +425,7 @@ export function createStatsService({
 
             await tryStore('write pull requests', async (s) => {
                 await s.savePullRequests(prs);
-                for (const repo of repoNames) {
+                for (const repo of repoNames()) {
                     // Only a walk that reached the end may move the watermark. Advancing it
                     // after a partial walk skips everything the walk never reached, silently
                     // and permanently.
@@ -401,7 +444,7 @@ export function createStatsService({
             // store. `?? prs` is the degraded-database fallback, not a no-store one: a failed
             // read leaves this pass showing only what just changed rather than nothing at all.
             const stored = await tryStore('read pull requests', (s) =>
-                s.loadPullRequests(client.provider, repoNames),
+                s.loadPullRequests(client.provider, repoNames()),
             );
             const all = stored ?? prs;
 
@@ -466,7 +509,7 @@ export function createStatsService({
             if (!held || commit.committedAt > held) newest.set(commit.repo, commit.committedAt);
         }
         const since = Object.fromEntries(
-            repoNames.map((repo) => {
+            repoNames().map((repo) => {
                 const tip = newest.get(repo);
                 // The overlap is not paranoia: a commit date is not monotonic with history order,
                 // so a rebase can place a commit behind its own parent and a zero-overlap
@@ -509,8 +552,8 @@ export function createStatsService({
             });
 
             const persisted = await tryStore('read branch history', async (s) => ({
-                commits: await s.loadBranchCommits(client.provider, repoNames, config.baseBranch),
-                coverage: await s.loadBranchCoverage(client.provider, repoNames, config.baseBranch),
+                commits: await s.loadBranchCommits(client.provider, repoNames(), config.baseBranch),
+                coverage: await s.loadBranchCoverage(client.provider, repoNames(), config.baseBranch),
             }));
 
             const fetched: CommitPoint[] = histories.flatMap((entry) =>
@@ -568,7 +611,11 @@ export function createStatsService({
 
     async function produceTelemetry(): Promise<TelemetrySnapshot> {
         try {
-            const input = await telemetry.fetchRollups({ repos: repoNames });
+            // Its own `list()`, not a borrow of the PR path's: the two slots have separate TTLs and
+            // either can run without the other, so telemetry must not depend on a sync having gone
+            // first to populate the snapshot. The call is cached, so this is usually free.
+            await repos.list();
+            const input = await telemetry.fetchRollups({ repos: repoNames() });
             telemetryFailure = null;
             return { input };
         } catch (e) {
@@ -583,7 +630,7 @@ export function createStatsService({
     // One TTL, because history is always persisted: the ordinary refresh is an incremental walk of
     // a few pages, and the full walk it may escalate to is gated by its own 24h schedule and by
     // the remaining rate-limit budget rather than by any clock here.
-    const cache = createCache<StatsSnapshot>({ ttlMs: config.syncTtlMs, produce, now });
+    const cache = createCache<StatsSnapshot>({ ttlMs: syncTtlMs, produce, now });
     // A second slot with its own TTL. Sharing the PR slot would hide a session that just
     // finished for as long as that slot lives, and its floor exists to protect a rate-limit
     // budget this query does not spend.
@@ -609,7 +656,7 @@ export function createStatsService({
         const source = config.telemetrySource === 'postgres' ? 'postgres' : 'fixture';
         const base = {
             source,
-            repoFilter: repoNames,
+            repoFilter: repoNames(),
             otherRepoSessions: stats?.otherRepoSessions ?? 0,
             sessionsWithoutHook: stats?.sessionsWithoutHook ?? 0,
         } as const;
@@ -681,14 +728,14 @@ export function createStatsService({
         // back this far". Naming the repo matters: a combined figure over a subset is worse than
         // no figure.
         const short = snapshot.coverage.filter((c) => range.from !== null && c.from > range.from);
-        const missing = repoNames.filter((repo) => !snapshot.coverage.some((c) => c.repo === repo));
+        const missing = repoNames().filter((repo) => !snapshot.coverage.some((c) => c.repo === repo));
         if (short.length || missing.length) {
-            const repos = [...short.map((c) => c.repo), ...missing];
+            const uncovered = [...short.map((c) => c.repo), ...missing];
             return {
                 history: null,
                 revert: {
                     status: 'unavailable',
-                    reason: `Persisted history for ${repos.join(', ')} does not reach back to the start of this range`,
+                    reason: `Persisted history for ${uncovered.join(', ')} does not reach back to the start of this range`,
                 },
             };
         }
@@ -714,19 +761,31 @@ export function createStatsService({
             if (priming) return priming;
 
             priming = (async () => {
-                const loaded = await tryStore('prime', async (s) => ({
-                    prs: await s.loadPullRequests(client.provider, repoNames),
-                    commits: await s.loadBranchCommits(client.provider, repoNames, config.baseBranch),
-                    coverage: await s.loadBranchCoverage(client.provider, repoNames, config.baseBranch),
-                    sync: await s.readSyncState(client.provider, repoNames, PR_KIND),
-                }));
+                // The stored rows are keyed by repo, so priming without a list loads nothing and
+                // the slot stays empty until the first sync — which is exactly the cold start
+                // priming exists to avoid. Not fatal when it fails: an unreachable installation
+                // should not stop a warm database being read, and `produce()` refuses separately.
+                await repos.list();
+                const loaded = await tryStore('prime', async (s) => {
+                    // Four independent reads. Sequentially they made a cold start as slow as their
+                    // sum, for no reason — this is the path whose whole purpose is serving data
+                    // before the first fetch finishes.
+                    const names = repoNames();
+                    const [prs, commits, coverage, sync] = await Promise.all([
+                        s.loadPullRequests(client.provider, names),
+                        s.loadBranchCommits(client.provider, names, config.baseBranch),
+                        s.loadBranchCoverage(client.provider, names, config.baseBranch),
+                        s.readSyncState(client.provider, names, PR_KIND),
+                    ]);
+                    return { prs, commits, coverage, sync };
+                });
                 if (!loaded || !loaded.prs.length) return;
 
-                const lastSyncAt = repoNames
+                const lastSyncAt = repoNames()
                     .map((repo) => loaded.sync[repo]?.lastSyncAt)
                     .filter((at): at is string => typeof at === 'string')
                     .reduce<string | null>((min, at) => (min === null || at < min ? at : min), null);
-                const rateLimit = repoNames
+                const rateLimit = repoNames()
                     .map((repo) => loaded.sync[repo]?.lastRateLimit)
                     .find((limit): limit is RateLimit => !!limit) ?? null;
 
@@ -793,7 +852,7 @@ export function createStatsService({
                 ? attribute(
                       prs.map(toJoinKey),
                       filterTelemetryInput(telemetryEntry.value.input, range),
-                      { repos: repoNames, now: new Date(now()) },
+                      { repos: repoNames(), now: new Date(now()) },
                   )
                 : null;
 
@@ -814,7 +873,7 @@ export function createStatsService({
                         current: organization,
                         available: [organization],
                     },
-                    repos: config.repos.map((repo) => ({ owner: repo.owner, name: repo.name })),
+                    repos: repos.snapshot().map((repo) => ({ owner: repo.owner, name: repo.name })),
                     baseBranch: config.baseBranch,
                     range,
                     telemetry: telemetryMeta(telemetryEntry, telemetry),

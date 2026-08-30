@@ -15,10 +15,16 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     // First, so the "expected one of" message on an unknown section reads identity-first.
     'organization.id': { env: 'ORG_ID', kind: 'string' },
     'organization.name': { env: 'ORG_NAME', kind: 'string' },
-    'organization.repos': { env: 'ORG_REPOS', kind: 'list' },
     'organization.workspace_root': { env: 'ORG_WORKSPACE_ROOT', kind: 'string' },
-    'github.token': { env: 'GITHUB_TOKEN', kind: 'string' },
-    'github.owner': { env: 'GITHUB_OWNER', kind: 'string' },
+    // GITHUB_API_URL is deliberately absent, for the same reason the three GITHUB_OAUTH_*_URL
+    // overrides below are: a configurable API host in a file that ships with a deployment is
+    // somewhere to send a private key.
+    'github.mode': { env: 'GITHUB_MODE', kind: 'string' },
+    'github.app_id': { env: 'GITHUB_APP_ID', kind: 'string' },
+    'github.installation_id': { env: 'GITHUB_APP_INSTALLATION_ID', kind: 'string' },
+    'github.private_key': { env: 'GITHUB_APP_PRIVATE_KEY', kind: 'string' },
+    // A path, read by resolveConfig below rather than by loadConfig, which does no I/O.
+    'github.private_key_file': { env: 'GITHUB_APP_PRIVATE_KEY_FILE', kind: 'string' },
     'github.base_branch': { env: 'BASE_BRANCH', kind: 'string' },
     'github.bots': { env: 'BOTS', kind: 'list' },
     'server.port': { env: 'PORT', kind: 'int' },
@@ -44,8 +50,14 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     'auth.ingest_token': { env: 'INGEST_TOKEN', kind: 'string' },
 };
 
-/** Every env key whose value is a secret, so one list decides what the mode warning covers. */
-const SECRET_KEYS = ['GITHUB_TOKEN', 'GITHUB_OAUTH_CLIENT_SECRET', 'SESSION_SECRET', 'INGEST_TOKEN'];
+/**
+ * Every env key whose value is a secret, so one list decides what the mode warning covers.
+ *
+ * GITHUB_APP_PRIVATE_KEY is the worst of these to leak and replaced the least bad: a PAT carries
+ * whatever scopes it was issued with and can be revoked, while the key mints installation tokens
+ * indefinitely and rotating it means generating a new one in GitHub's UI.
+ */
+const SECRET_KEYS = ['GITHUB_APP_PRIVATE_KEY', 'GITHUB_OAUTH_CLIENT_SECRET', 'SESSION_SECRET', 'INGEST_TOKEN'];
 
 const SECTIONS = [...new Set(Object.keys(KEYS).map((path) => path.split('.')[0]))];
 
@@ -55,10 +67,9 @@ const SECTIONS = [...new Set(Object.keys(KEYS).map((path) => path.split('.')[0])
  * demonstrably worked yesterday, and the reader's next move is to type it again.
  */
 const MOVED: Record<string, { readonly to: string; readonly why: string }> = {
-    'github.repos': {
-        to: 'organization.repos',
-        why: 'the organization owns the repo list now',
-    },
+    // github.repos used to move to organization.repos. Both are gone now, so it is listed in
+    // REMOVED instead — pointing somebody at a key that no longer exists either is worse than the
+    // "unknown key" message this whole table exists to avoid.
     'cache.ttl_seconds': {
         to: 'cache.sync_ttl_seconds',
         why: 'refreshes are incremental now that history is always persisted, so the 300s-per-repo full-walk floor no longer applies',
@@ -73,6 +84,14 @@ const MOVED: Record<string, { readonly to: string; readonly why: string }> = {
 const REMOVED: Record<string, string> = {
     'github.source':
         'the database is the only source the dashboard reads. For data without a GitHub token, seed a disposable database: npm run seed',
+    'github.token':
+        'the repo-read credential is a GitHub App installation now. Set github.mode = "app" with github.app_id and github.private_key (or github.private_key_file), or github.mode = "none" to serve stored data',
+    'github.owner':
+        'the installation reports each repository with its own owner, so there is no default owner for a bare name to take. Use organization.name to change what the page calls this organization',
+    'organization.repos':
+        'the repo list is whatever the GitHub App installation reports, and each member chooses which of those to check out from the dashboard. Install the App on the repositories you want measured instead',
+    'github.repos':
+        'the repo list is whatever the GitHub App installation reports. This key moved to organization.repos once; that is gone too. Install the App on the repositories you want measured instead',
 };
 
 export interface FileConfig {
@@ -276,9 +295,37 @@ export function mergeSources(file: FileConfig | null, env: NodeJS.ProcessEnv): N
 
 export interface ResolvedConfig {
     readonly config: AppConfig;
-    /** The merged record, so `envTokenProvider` sees the file's token too. Never log it. */
+    /** The merged record. Holds every secret the file carried, so never log it. */
     readonly env: NodeJS.ProcessEnv;
     readonly source: string | null;
+}
+
+/**
+ * Reads GITHUB_APP_PRIVATE_KEY_FILE into GITHUB_APP_PRIVATE_KEY.
+ *
+ * Here rather than in `loadConfig`, because that validator is not allowed to touch the filesystem —
+ * the same rule that keeps a factory.toml invisible to it. This module already does every byte of
+ * I/O in the system, so the key is one more file it reads, and by the time the validator runs there
+ * is only ever a PEM in the record.
+ *
+ * An explicit path that cannot be read is fatal and says why. The usual cause is the same one
+ * `readConfigFile` already explains: a host file at mode 600 bind-mounted into a container running
+ * as `node`.
+ */
+function readPrivateKeyFile(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const path = env.GITHUB_APP_PRIVATE_KEY_FILE?.trim();
+    // An inline key wins, so a stale FILE line left in a factory.toml cannot override the value an
+    // operator just set in the environment. Same env-first contract as everything else here.
+    if (!path || env.GITHUB_APP_PRIVATE_KEY) return env;
+
+    try {
+        return { ...env, GITHUB_APP_PRIVATE_KEY: readFileSync(path, 'utf8').trim() };
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        throw new Error(
+            `GITHUB_APP_PRIVATE_KEY_FILE points at ${path}, which could not be read (${code ?? 'unknown error'})`,
+        );
+    }
 }
 
 /**
@@ -289,7 +336,7 @@ export interface ResolvedConfig {
 export function resolveConfig(options: ReadOptions = {}): ResolvedConfig {
     const env = options.env ?? process.env;
     const file = readConfigFile({ ...options, env });
-    const merged = mergeSources(file, env);
+    const merged = readPrivateKeyFile(mergeSources(file, env));
 
     try {
         return { config: loadConfig(merged), env: merged, source: file?.path ?? null };

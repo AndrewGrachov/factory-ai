@@ -183,13 +183,24 @@ docker build -q -t "$IMAGE_OK" -f "$work/Dockerfile.ok" "$work" >/dev/null &&
     exit 1
 }
 
-# An empty config file, so the repo's own factory.toml cannot reach this run: its token would make
-# loadConfig refuse a *_test database, and its workspace_root would start cloning repositories.
+# An empty config file, so the repo's own factory.toml cannot reach this run: its App credentials
+# would make loadConfig refuse a *_test database, and its workspace_root would point the board at a
+# developer's real checkouts.
+#
+# A workspace root IS set, under $work, and it has to be: with none, the board reports a null
+# `workspacePath` on every claim and the driver fails each job rather than guessing a directory.
+# Nothing is cloned into it — clones only happen when somebody selects repositories — so this costs
+# one empty directory per job author.
 : >"$work/factory.toml"
 
+# GITHUB_MODE=none on every boot below. It defaults to `app`, which is fatal without an App id and
+# private key — deliberately, so nobody reaches "fetches nothing" by forgetting a variable. This
+# harness reaches it on purpose: it drives the whole lease protocol with no credential at all.
+export GITHUB_MODE=none
+
 echo "starting the board on $BASE"
-env -u GITHUB_TOKEN DATABASE_URL="$DATABASE_URL" PORT="$PORT" HOST=127.0.0.1 \
-    FACTORY_CONFIG="$work/factory.toml" ORG_WORKSPACE_ROOT= \
+env DATABASE_URL="$DATABASE_URL" PORT="$PORT" HOST=127.0.0.1 \
+    FACTORY_CONFIG="$work/factory.toml" ORG_WORKSPACE_ROOT="$work/workspaces" \
     node server/dist/index.js >"$work/server.log" 2>&1 &
 server_pid=$!
 
@@ -288,6 +299,12 @@ expect_status 'a parked job is not offered'   204 POST /api/jobs/claim '{"worker
 expect_status 'resume needs no lease token'   200 POST "/api/jobs/$park_id/resume" '{}'
 resumed="$(body "$(api POST /api/jobs/claim '{"worker":"resumes","leaseSeconds":300}')")"
 expect_field  'the resumed job comes back'    "$resumed" id "$park_id"
+# The per-member workspace, ready-made by the board: `<org>/<user id>`. The driver refuses anything
+# that is not exactly that before interpolating it into a `docker run`.
+case "$(field "$resumed" workspacePath)" in
+default/????????-????-????-????-????????????) ok 'the claim carries a workspace path' ;;
+*) bad 'the claim carries a workspace path' "got '$(field "$resumed" workspacePath)'" ;;
+esac
 expect_field  'the claim carries the session' "$resumed" resumeSessionId "$PARKED_SESSION"
 # Parking gave back the attempt it took, so this second claim is still attempt 1.
 expect_field  'parking did not burn a try'    "$resumed" attempts 1
@@ -301,8 +318,10 @@ echo
 echo '# driver'
 
 start_driver() { # start_driver <image>
+    # No ORG_ID. The board sends `workspacePath` on the claim now — it owns the layout, because it
+    # is the thing that created the directory — so the driver builds no path of its own.
     env JOB_BOARD_URL="$BASE" EXECUTOR_IMAGE="$1" WORKSPACE_VOLUME="$VOLUME" \
-        DRIVER_POLL_MS=500 DRIVER_CONCURRENCY=2 DRIVER_LEASE_SECONDS=60 ORG_ID=default \
+        DRIVER_POLL_MS=500 DRIVER_CONCURRENCY=2 DRIVER_LEASE_SECONDS=60 \
         node driver/dist/index.js >>"$work/driver.log" 2>&1 &
     driver_pid=$!
 }
@@ -373,8 +392,8 @@ server_pid=""
 AUTH_PORT=$((PORT + 1))
 AUTH_BASE="http://127.0.0.1:$AUTH_PORT"
 
-env -u GITHUB_TOKEN DATABASE_URL="$DATABASE_URL" PORT="$AUTH_PORT" HOST=127.0.0.1 \
-    FACTORY_CONFIG="$work/factory.toml" ORG_WORKSPACE_ROOT= \
+env DATABASE_URL="$DATABASE_URL" PORT="$AUTH_PORT" HOST=127.0.0.1 \
+    FACTORY_CONFIG="$work/factory.toml" ORG_WORKSPACE_ROOT="$work/workspaces" \
     AUTH_MODE=github \
     GITHUB_OAUTH_CLIENT_ID=stub-client GITHUB_OAUTH_CLIENT_SECRET=stub-secret \
     SESSION_SECRET=a-job-harness-session-secret-32-chars \
@@ -406,8 +425,8 @@ else
 
     # Minted the way an operator mints one: printed once, only its hash stored. Pointed at the same
     # empty config the board uses — the CLI runs loadConfig too, so the repo's own factory.toml
-    # would otherwise refuse a *_test database on account of the token in it.
-    token="$(env -u GITHUB_TOKEN DATABASE_URL="$DATABASE_URL" FACTORY_CONFIG="$work/factory.toml" \
+    # would otherwise refuse a *_test database on account of the App credentials in it.
+    token="$(env DATABASE_URL="$DATABASE_URL" FACTORY_CONFIG="$work/factory.toml" \
         node server/dist/admin/worker-token.js --name harness-driver 2>>"$work/auth-server.log" |
         sed -n 's/.*JOB_BOARD_TOKEN=//p' | tr -d ' \r')"
     case "$token" in

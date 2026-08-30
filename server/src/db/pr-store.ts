@@ -47,6 +47,20 @@ export interface PrStore {
     loadPullRequests(provider: ProviderId, repos: readonly string[]): Promise<CanonicalPr[]>;
     savePullRequests(prs: readonly CanonicalPr[]): Promise<void>;
 
+    /**
+     * Every repo this organization has rows for, as "owner/name".
+     *
+     * The repo list normally comes from the GitHub App installation, but a deployment running
+     * `GITHUB_MODE=none` has no installation to ask — and every other read below is scoped BY the
+     * repo list, so without an answer a warm database renders as an empty dashboard. That is not a
+     * hypothetical: `npm run seed` plus `npm run verify:ui` is exactly that shape, and so is any
+     * deployment whose credential was removed.
+     *
+     * "Whatever is stored" is also the honest answer there. A process that cannot fetch has no way
+     * to know about a repo it holds no rows for, so reporting one would be a claim it cannot make.
+     */
+    storedRepos(provider: ProviderId): Promise<string[]>;
+
     loadBranchCommits(
         provider: ProviderId,
         repos: readonly string[],
@@ -149,6 +163,16 @@ export function createPrStore({
     };
 
     return {
+        async storedRepos(provider) {
+            await gate();
+            const rows = await sql<{ repo: string }[]>`
+                select distinct repo from pull_request
+                where org_id = ${orgId} and provider = ${provider}
+                order by repo asc
+            `;
+            return rows.map((row) => row.repo);
+        },
+
         async loadPullRequests(provider, repos) {
             await gate();
             if (!repos.length) return [];

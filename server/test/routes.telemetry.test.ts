@@ -238,7 +238,8 @@ describe('loadConfig', () => {
     // DATABASE_URL is required for every configuration now, so it is a baseline rather than the
     // subject of any case here.
     const DB = 'postgres://factory:factory@127.0.0.1:5432/factory_dev';
-    const env = (extra: NodeJS.ProcessEnv = {}) => ({ DATABASE_URL: DB, ...extra });
+    // GITHUB_MODE likewise: it defaults to `app`, which is fatal without an App id and private key.
+    const env = (extra: NodeJS.ProcessEnv = {}) => ({ DATABASE_URL: DB, GITHUB_MODE: 'none', ...extra });
 
     it('rejects an unknown source', () => {
         expect(() => loadConfig(env({ TELEMETRY_SOURCE: 'clickhouse' }))).toThrow(/TELEMETRY_SOURCE/);
@@ -255,7 +256,6 @@ describe('loadConfig', () => {
         const config = loadConfig(env());
         expect(config.telemetrySource).toBe('postgres');
         expect(config.telemetryTtlMs).toBe(30_000);
-        expect(config.repoNames).toEqual(['Bellows-AI/bellows.ai']);
     });
 
     it('still defaults the organization, which nothing here should have changed', () => {

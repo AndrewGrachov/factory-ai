@@ -13,11 +13,23 @@ export interface BoardJob {
     /**
      * The account that queued the job, or null for an unattributed one.
      *
-     * Nothing here reads it yet: it is carried so the per-user Claude credential and per-user
-     * workspace work is a change to this process alone rather than to the protocol as well. Read
-     * defensively, like `resumeSessionId`, because a board that predates the field omits it.
+     * Still not read here — the per-user Claude credential is what will read it. `workspacePath`
+     * below is what the workspace half turned into. Read defensively, like `resumeSessionId`,
+     * because a board that predates the field omits it.
      */
     userId: string | null;
+    /**
+     * Where that person's checkouts live, relative to the mounted workspace volume.
+     *
+     * `<org>/<user id>`, built by the board. A ready-made path rather than the raw `userId` because
+     * the board owns the layout — it is what created the directory — and this process owns only the
+     * mount point. Reimplementing `<org>/<uuid>` here would be a second copy of a rule this side
+     * cannot verify.
+     *
+     * Null when the job has no author or the board has no workspace root, and a null is FAILED
+     * rather than fallen back from. See dockerArgs.
+     */
+    workspacePath: string | null;
 }
 
 /** Whether the board still recognises this worker as the holder of the job. */
@@ -91,6 +103,7 @@ export function createBoard({
                 ...(claimed as BoardJob),
                 resumeSessionId: claimed.resumeSessionId ?? null,
                 userId: claimed.userId ?? null,
+                workspacePath: claimed.workspacePath ?? null,
             };
         },
 

@@ -6,32 +6,54 @@ import { resolveConfig } from './config-file.js';
 import { createJobStore } from './db/job-store.js';
 import { migrate } from './db/migrate.js';
 import { createPrStore } from './db/pr-store.js';
+import { createUserRepoStore } from './db/user-repo-store.js';
+import { createCloneQueue } from './workspace/queue.js';
 import { createPostgresTelemetryClient } from './telemetry/postgres-client.js';
 import { createPostgresStore } from './telemetry/store.js';
 import { createGitHubClient } from './github/client.js';
-import { envTokenProvider } from './github/token.js';
+import { createGitHubAppClient } from './github/app-client.js';
+import { installationTokenProvider } from './github/app-token.js';
+import { createRepoSource } from './github/repo-source.js';
+import type { TokenProvider } from './github/token.js';
 import { createStatsService } from './stats-service.js';
 import { createFixtureTelemetryClient, createNullTelemetryClient } from './telemetry/fixture-client.js';
-import { ensureWorkspace } from './workspace/reconcile.js';
 
-// `env` is the file merged under process.env. It has to reach envTokenProvider, which is the one
-// place outside config.ts that reads the PAT and would otherwise ignore the file's copy of it.
-const { config, env, source } = resolveConfig();
+const { config, source } = resolveConfig();
 console.log(`[config] ${source ?? 'no config file; environment only'}`);
 // The id, not just the name: it is the partition every stored row lands in, and a boot pointed at
 // an unexpected one is otherwise silent — the dashboard renders empty and looks like data loss.
 console.log(`[org] ${config.orgName} (${config.orgId})`);
 
-// A token is optional. Without one this process does not fetch — envTokenProvider throws before a
-// request is ever built — and the dashboard serves whatever is already stored, reporting the fetch
-// failure in `meta` rather than pretending. That is what lets a seeded database be browsed with no
-// credentials and no network.
-const client = createGitHubClient({ config, tokens: envTokenProvider(env) });
-console.log(
-    env.GITHUB_TOKEN
-        ? '[fetch] syncing from GitHub'
-        : '[fetch] no GITHUB_TOKEN: serving stored data only, nothing will be fetched',
-);
+/*
+ * The repo-read credential, and with it the repo list.
+ *
+ * Under `none` there is no provider and no App client, so nothing can fetch by construction rather
+ * than by a flag somebody has to remember to check. The repo source then falls back to the repos the
+ * database already holds rows for, which is what lets a seeded database be browsed with no
+ * credentials and no network — the list has to come from somewhere, because every stored read is
+ * scoped by it.
+ *
+ * The private key is on `config` already: resolveConfig read GITHUB_APP_PRIVATE_KEY_FILE before the
+ * validator ran, so there is no second place here that has to know a file might hold it.
+ */
+let tokens: TokenProvider | undefined;
+let appClient;
+if (config.github.mode === 'app') {
+    const provider = installationTokenProvider({ github: config.github });
+    tokens = provider;
+    appClient = createGitHubAppClient(config.github, provider);
+    console.log(
+        `[fetch] GitHub App ${config.github.appId}, installation ${config.github.installationId ?? 'discovered at first use'}`,
+    );
+    // Loud, for the reason the OAuth authorize URL is: an API host that could be redirected in a
+    // file shipping with a deployment is somewhere to send a private key, so the only defence is
+    // that using one is impossible to miss in the log.
+    if (config.github.apiUrl !== 'https://api.github.com') {
+        console.warn(`[fetch] NOT using api.github.com: API URL is ${config.github.apiUrl}`);
+    }
+} else {
+    console.log('[fetch] GITHUB_MODE=none: serving stored data only, nothing will be fetched or cloned');
+}
 
 // One pool, and one `migrate()`, for both the telemetry store and the PR store. They are
 // independent features sharing a schema, and two runners would race each other.
@@ -71,9 +93,37 @@ const store = config.telemetrySource === 'postgres' ? createPostgresStore({ sql,
 const prStore = createPrStore({ sql, orgId: config.orgId, ready });
 console.log(`[persist] ${config.databaseUrl.replace(/\/\/[^@]*@/, '//')}`);
 
+// After the store, because the `none`-mode fallback reads from it. The GitHub client is built off
+// this rather than off the config, which is the whole shape of the change: the repo list is an
+// answer somebody has to be asked for, not a field.
+const repos = createRepoSource({
+    client: appClient,
+    stored: () => prStore.storedRepos('github'),
+});
+const client = createGitHubClient({ config, repos, tokens });
+
 // Unconditional, unlike the telemetry store: the database is mandatory and the board is not a
 // product option. It gates its own queries on `ready`, so it is safe to build before migrations.
-const jobStore = createJobStore({ sql, orgId: config.orgId, ready });
+const jobStore = createJobStore({
+    sql,
+    orgId: config.orgId,
+    hasWorkspaces: config.workspaceRoot !== null,
+    ready,
+});
+
+// Unconditional too, and note that this does NOT depend on a workspace root being configured: with
+// none, the routes still answer and report that the feature is off. Only the QUEUE is conditional,
+// because there is nowhere to clone to.
+const userRepoStore = createUserRepoStore({ sql, orgId: config.orgId, ready });
+const cloneQueue = config.workspaceRoot
+    ? createCloneQueue({
+          store: userRepoStore,
+          root: config.workspaceRoot,
+          orgId: config.orgId,
+          tokens,
+          log: (m) => console.log(`[workspace] ${m}`),
+      })
+    : undefined;
 
 // Unconditional, for the same reason the job store is: the database is mandatory, so there is
 // always somewhere for accounts to live. buildApp's optional `auth` is for the route tests.
@@ -119,12 +169,15 @@ if (config.auth.mode === 'github') {
     );
 }
 
-const service = createStatsService({ config, client, telemetry, store: prStore });
+const service = createStatsService({ config, client, repos, telemetry, store: prStore });
 const app = await buildApp({
     config,
     service,
+    repos,
     store,
     jobs: jobStore,
+    userRepos: userRepoStore,
+    cloneQueue,
     auth: authStore,
     identity,
     logger: true,
@@ -138,20 +191,12 @@ service.prime().catch((e: Error) => console.error(`[persist] prime failed: ${e.m
 // Warm the cache at boot so the first visitor does not eat the cold fetch.
 service.ensureFresh();
 
-// Also fired, not awaited: a clone is minutes of network for something no route reads, so blocking
-// listen() on it would make the dashboard unavailable for a feature it does not use.
+// Also fired, not awaited. It recovers rows a restart stranded mid-clone and sweeps the partial
+// trees those left behind, then polls — all of which is minutes of network for something no route
+// on the read path needs, so `listen()` must not wait on it.
 //
-// The token is read off the merged record directly rather than through envTokenProvider, which
-// throws when there is none. Here that is not an error: without a token the public repos still
-// clone and the private ones report a named failure.
-if (config.workspaceRoot) {
-    ensureWorkspace({
-        root: config.workspaceRoot,
-        orgId: config.orgId,
-        repos: config.repos,
-        token: env.GITHUB_TOKEN,
-        log: (m) => console.log(`[workspace] ${m}`),
-    }).catch((e: Error) => console.error(`[workspace] ${e.message}`));
-}
+// Note what this does NOT do any more: clone anything on its own. Boot checks nothing out. A clone
+// happens only after somebody signs in and chooses repositories.
+cloneQueue?.start().catch((e: Error) => console.error(`[workspace] ${e.message}`));
 
 await app.listen({ port: config.port, host: config.host });

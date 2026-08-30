@@ -5,7 +5,13 @@ export type GitHubErrorCode =
     | 'NOT_FOUND'
     | 'UPSTREAM'
     | 'NETWORK'
-    | 'GRAPHQL';
+    | 'GRAPHQL'
+    /**
+     * The App installation could not say which repositories it can see, so there is nothing to
+     * scope a sync to. Its own code because the remedy is different from every other failure here:
+     * the App is unreachable or uninstalled, not the credential rejected or the repo missing.
+     */
+    | 'REPO_LIST';
 
 export class GitHubError extends Error {
     readonly code: GitHubErrorCode;

@@ -1,6 +1,7 @@
 # Security posture
 
-Read before: changing a bind address, a header, a PAT scope, or any `OTEL_LOG_*` setting.
+Read before: changing a bind address, a header, a GitHub App permission, or any `OTEL_LOG_*`
+setting.
 
 **There are two postures, and `AUTH_MODE` picks between them explicitly.** With `AUTH_MODE=github`
 every `/api/*` route requires a credential — a session cookie for people, a `Bearer fwt_…` worker
@@ -16,23 +17,43 @@ answered 401 there would be nothing left to render a sign-in button in. The wall
 **Authentication is not a sandbox.** Signing in narrows "anyone who can reach the port" to "any
 member of this organization"; it does not make any route safe to hand out. See the job board below.
 
-Required fine-grained PAT permissions: `Metadata: read`, `Pull requests: read`, and
+**Two GitHub registrations, on purpose.** An OAuth App signs people in and requests *zero* scopes;
+a separate GitHub App reads repositories. One credential doing both would mean every person who
+signs in grants repository access, which is exactly the conflation `docs/auth.md` warns about.
+
+Required GitHub App installation permissions: `Metadata: read`, `Pull requests: read`, and
 `Contents: read` (revert rate only).
 
-The PAT may now sit on disk in `factory.toml`, which is gitignored and dockerignored. `chmod 600`
-it — the boot warning about a group/world-readable mode is not decorative, because no
-application-level auth plus a readable token is worse than either alone. That warning covers
-`GITHUB_OAUTH_CLIENT_SECRET`, `SESSION_SECRET` and `INGEST_TOKEN` as well as the PAT: a file holding
-only a session secret is exactly as bad, and keying the check on one name would have left it silent.
+**The App private key is the worst secret in this repository to leak, and it replaced the least
+bad.** A PAT carries whatever scopes it was issued with, can be revoked from a list, and expires; a
+private key mints installation tokens indefinitely, and rotating it means generating a new key in
+GitHub's UI and redeploying. It may sit on disk in `factory.toml` — gitignored and dockerignored —
+or in a `.pem` that `GITHUB_APP_PRIVATE_KEY_FILE` points at. `chmod 600` either: the boot warning
+about a group/world-readable mode is not decorative, because no application-level auth plus a
+readable key is worse than either alone. That warning covers `GITHUB_OAUTH_CLIENT_SECRET`,
+`SESSION_SECRET` and `INGEST_TOKEN` too — a file holding only a session secret is exactly as bad,
+and keying the check on one name would have left it silent.
+
+**What the App improved:** the credential that reaches `git` is now an *installation token* that
+expires in an hour, rather than a long-lived PAT. A leaked one is a bounded problem, and it is
+minted fresh per clone precisely because a batch can outlive one.
 
 `SESSION_SECRET` signs the session cookie, so rotating it logs everyone out — which is the only
 lever there is when something has leaked. Session rows hold the sha-256 of a token, never the token,
 because the table would otherwise be a list of every live credential.
 
-With `ORG_WORKSPACE_ROOT` set, the PAT is also used to clone private source onto the host, and that
-source then sits in a plain directory next to a service with no auth. The token is passed to `git`
-through the child environment and never on a command line or into `.git/config` — see
-[workspace.md](workspace.md) for why that distinction is load-bearing.
+With `ORG_WORKSPACE_ROOT` set, that installation token is also used to clone private source onto the
+host, and that source then sits in a plain directory. It is passed to `git` through the child
+environment and never on a command line or into `.git/config` — see [workspace.md](workspace.md) for
+why that distinction is load-bearing.
+
+**Checkouts are per member, and the isolation is a path.** Each person's clones live under their own
+`app_user.id`, and a runner is given `WORKDIR=<mount>/<org>/<user id>` — never `<mount>` or
+`<mount>/<org>`, both of which are the *parent* of everybody's tree. A job whose author cannot be
+resolved is failed rather than run somewhere broader, and the driver re-asserts the whole
+`<org>/<uuid>` shape before interpolating it into a `docker run`. This is a boundary against
+accident, not against a determined member: anyone who can queue a job can ask the agent to read any
+path the container can see.
 
 **The driver mounts `/var/run/docker.sock`, which is root on the host.** A process holding that
 socket can start a container with the host filesystem mounted, so it is not "docker access", it is

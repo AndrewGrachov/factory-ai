@@ -27,6 +27,33 @@ export function prLabel(repo: string, number: number, repoCount: number): string
 }
 
 /**
+ * A checkout's size on disk.
+ *
+ * Null is an em dash like everything else here, and it matters more than usual: a repository that
+ * is still cloning has no size, and `0 B` would read as an empty repository rather than as one
+ * nobody has measured. Powers of 1024, because this is disk.
+ */
+export function bytes(value: number | null | undefined): string {
+    if (value === null || value === undefined) return '—';
+    if (value < 1024) return `${Math.round(value)} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let size = value / 1024;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+        size /= 1024;
+        unit += 1;
+    }
+    return `${num(size, size < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+/** Just the day. A commit's time of day is noise in a table of repositories. */
+export function commitDate(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    const at = new Date(iso);
+    return Number.isNaN(at.getTime()) ? '—' : at.toISOString().slice(0, 10);
+}
+
+/**
  * Rounded on purpose. The branch attribution behind these figures is a ~20s sample from a
  * hook that is allowed to fail, so "92.4k" is the honest precision and "92,431" is not.
  */

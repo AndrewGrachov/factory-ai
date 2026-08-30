@@ -32,8 +32,8 @@ them. Do not "simplify" them.
   `2026-08-21T12:00:00.000Z`. Keep using the injection point.
 - **`weeklySeries()` seeds every week in the window, including empty ones.** A median over only
   the weeks that had a merge overstates throughput.
-- **`SYNC_TTL_SECONDS` (floor 60 per repo) is the only cache floor, and `CACHE_TTL_SECONDS` is
-  gone.** The 300-per-repo floor protected a full walk's ~243 rate-limit points, which every
+- **`SYNC_TTL_SECONDS` (floored at 60 per measured repo) is the only cache floor, and
+  `CACHE_TTL_SECONDS` is gone.** The 300-per-repo floor protected a full walk's ~243 rate-limit points, which every
   refresh used to be; history is always persisted now, so the ordinary refresh is an incremental
   walk of a few pages. The full walk is not gated by a TTL at all — it runs on
   `FULL_RESYNC_INTERVAL_MS` (24h) and refuses to start unless `last_rate_limit.remaining` actually
@@ -44,6 +44,15 @@ them. Do not "simplify" them.
   and explain itself, not blank the dashboard. `useStats` likewise never clears `data` on error.
 - **`ERROR_COOLDOWN_MS` (30s) after a failed fetch.** Without it every request restarts the
   fetch and a rejected token becomes a request loop. `POST /api/refresh` bypasses it.
+- **`INSTALLATION_REPOS_TTL_MS` (10 min) on the repo list.** Long next to the sync TTL, because the
+  answer changes when a human installs or uninstalls the GitHub App — minutes, not seconds — and
+  short enough that granting the App a new repository shows up without a restart, which is the
+  workflow that replaced `ORG_REPOS`. A failed refresh serves the last good list with the reason
+  named, exactly as a stale snapshot does.
+- **The per-repo sync floor is applied by the stats service, not by `loadConfig`.** It cannot be
+  applied there any more: the repo count comes from the installation and is not known at boot.
+  `loadConfig` still floors `SYNC_TTL_SECONDS` at one repo's worth, which is all it can honestly
+  check.
 - **The revert rate degrades alone.** It is the only metric needing `Contents: read`; a missing
   ref returns `null` history and `revert.status = 'unavailable'`, never `{commits: 0, reverts: 0}`.
 - **`core/test/metrics.independent.test.ts` shares no code with `core/src/metrics.ts` on

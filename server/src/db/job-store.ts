@@ -43,11 +43,26 @@ export interface Claim {
     /**
      * Who queued the job, so a worker can run it as them. Null for an unattributed job.
      *
-     * Reported now, before anything consumes it: the driver resolves a per-user credential and
-     * workspace from this, and shipping the field ahead of its consumer means that work is a change
-     * to the driver alone rather than a change to the protocol as well.
+     * It was shipped ahead of any consumer so that the per-user work would be a change to the
+     * driver alone. `workspacePath` below is the first half of that arriving; the per-user Claude
+     * credential is still to come, and this field is what it will read.
      */
     userId: string | null;
+    /**
+     * Where that person's checkouts are, RELATIVE to the workspace root: `<orgId>/<userId>`.
+     *
+     * Ready-made rather than a raw id, because each side owns what it knows. The server owns the
+     * layout — it is the thing that created the directory — and the driver owns where the volume is
+     * mounted, which need not be the same path the server sees. Handing over a uuid would make the
+     * driver reimplement a layout it cannot verify.
+     *
+     * Relative for the same reason: an absolute server-side path is meaningless inside a container
+     * that mounts the volume somewhere else.
+     *
+     * Null when the job has no author, or when this deployment has no workspace root. The driver
+     * FAILS such a job rather than falling back — see driver/src/loop.ts.
+     */
+    workspacePath: string | null;
     /**
      * Set only when this claim is picking a parked job back up, and it is the whole resume protocol:
      * the worker restores that session instead of starting a new one, and the command is not
@@ -145,13 +160,24 @@ const toJob = (row: JobRow): Job => ({
     finishedAt: iso(row.finished_at),
 });
 
-/** The organization is bound at construction, for the reasons given on createPrStore. */
+/**
+ * The organization is bound at construction, for the reasons given on createPrStore.
+ *
+ * `hasWorkspaces` is bound the same way, and it decides whether a claim reports a `workspacePath`
+ * at all. Without a configured workspace root no directory was ever created, so naming one would
+ * hand the driver a path that does not exist — and `docker run -w` silently CREATES a missing
+ * workdir, so the runner would start in an empty directory rather than failing the job. That is
+ * exactly the case the driver's null check exists to catch, and it only reaches it if the board is
+ * honest here.
+ */
 export function createJobStore({
     sql,
     orgId,
+    hasWorkspaces = true,
     ready,
 }: {
     sql: Sql;
+    hasWorkspaces?: boolean;
     orgId: string;
     ready?: Promise<unknown>;
 }): JobStore {
@@ -234,6 +260,10 @@ export function createJobStore({
                 leaseToken: row.lease_token,
                 leaseExpiresAt: row.lease_expires_at.toISOString(),
                 userId: row.created_by,
+                // Built here rather than in the route, because this is where the org is bound. Null
+                // for an unattributed job — no member, so no workspace — and null when this
+                // deployment has no workspace root, where no directory exists to point at.
+                workspacePath: hasWorkspaces && row.created_by ? `${orgId}/${row.created_by}` : null,
                 // Survived the case above, so this claim is a resume.
                 resumeSessionId: row.session_id,
             };

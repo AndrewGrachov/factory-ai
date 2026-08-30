@@ -1,9 +1,10 @@
 /**
  * The driver's configuration, read from the environment only.
  *
- * No factory.toml: the server's config file carries a GitHub token and describes a dashboard. This
- * process runs somewhere else — on the host, or in a container holding the docker socket — and the
- * two have almost nothing in common but ORG_ID.
+ * No factory.toml: the server's config file carries a GitHub App private key and describes a
+ * dashboard. This process runs somewhere else — on the host, or in a container holding the docker
+ * socket — and the two now have nothing in common at all: the board tells this process which
+ * workspace a job belongs to, so it does not even need to know the organization.
  */
 export interface DriverConfig {
     /** Where the board is. The driver is a client of it, never of the database. */
@@ -19,8 +20,13 @@ export interface DriverConfig {
     boardToken: string;
     /** Names this driver on every claim, so a stuck job can be traced back to a process. */
     worker: string;
-    /** Only used to build the runner's WORKDIR, `<workspaceMount>/<orgId>`. */
-    orgId: string;
+    /*
+     * `orgId` used to live here, and its only job was building the runner's WORKDIR as
+     * `<workspaceMount>/<orgId>`. The board sends `workspacePath` on the claim now — it owns the
+     * layout, because it is what created the directory — so this process builds nothing and no
+     * longer has to be told which organization it is working for. The worker token already says
+     * that, and said it more reliably.
+     */
     image: string;
     /**
      * The docker volume holding the checkouts — a NAME, not a host path. The dashboard writes them
@@ -84,7 +90,6 @@ export interface DriverConfig {
 
 const DEFAULTS = {
     boardUrl: 'http://127.0.0.1:8080',
-    orgId: 'default',
     image: 'claude-executor',
     workspaceVolume: 'factory-ai_workspaces',
     workspaceMount: '/workspaces',
@@ -145,7 +150,6 @@ export function loadDriverConfig(env: NodeJS.ProcessEnv): DriverConfig {
         boardUrl,
         boardToken: (env.JOB_BOARD_TOKEN ?? '').trim(),
         worker: text(env.DRIVER_WORKER, 'DRIVER_WORKER', `driver-${process.pid}`),
-        orgId: text(env.ORG_ID, 'ORG_ID', DEFAULTS.orgId),
         image: text(env.EXECUTOR_IMAGE, 'EXECUTOR_IMAGE', DEFAULTS.image),
         workspaceVolume: text(env.WORKSPACE_VOLUME, 'WORKSPACE_VOLUME', DEFAULTS.workspaceVolume),
         workspaceMount: text(env.WORKSPACE_MOUNT, 'WORKSPACE_MOUNT', DEFAULTS.workspaceMount),

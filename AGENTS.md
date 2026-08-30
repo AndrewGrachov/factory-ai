@@ -13,9 +13,10 @@ of decisions that look like cruft and are not, and most are guarded by a test th
 | `core/src/metrics.ts`, `canonical.ts`, the GraphQL query, cache/TTL constants | [docs/metrics.md](docs/metrics.md) |
 | Anything named `org_id`, `005_organizations.sql`, the org selector | [docs/organizations.md](docs/organizations.md) |
 | `server/src/auth/*`, `010_auth.sql`, the session cookie, the worker token, which routes need a credential | [docs/auth.md](docs/auth.md) |
+| `server/src/github/app-*`, `repo-source.ts`, `GITHUB_MODE`, the App private key | [docs/configuration.md](docs/configuration.md) |
 | `attribute()` keys, `004_pull_requests.sql` keys, per-repo rendering | [docs/repos.md](docs/repos.md) |
 | `config.ts`, `config-file.ts`, compose env blocks, `factory.toml` | [docs/configuration.md](docs/configuration.md) |
-| `server/src/workspace/*`, `ORG_WORKSPACE_ROOT`, the `git` install in the runtime image | [docs/workspace.md](docs/workspace.md) |
+| `server/src/workspace/*`, `011_user_workspace.sql`, `ORG_WORKSPACE_ROOT`, the `git` install in the runtime image | [docs/workspace.md](docs/workspace.md) |
 | `server/src/telemetry/*`, OTLP routes, SQL views, collector config | [docs/telemetry.md](docs/telemetry.md) |
 | `server/src/routes/jobs.ts`, `db/job-store.ts`, `006_jobs.sql`, `driver/*` | [docs/jobs.md](docs/jobs.md) |
 | `filterPrs()`, `parseRange`, `revertForRange()`, the range selector, charts | [docs/date-range.md](docs/date-range.md) |
@@ -33,6 +34,9 @@ repo.
 npm install
 
 # All of these need a database; there is no in-memory mode. `docker compose up -d timescale` first.
+# They also need a decision about GitHub: GITHUB_MODE defaults to `app` and is fatal without an App
+# id and private key. `GITHUB_MODE=none` serves whatever is already stored and fetches nothing —
+# that is a supported way to run, but not one you reach by forgetting a variable.
 npm run dev            # builds core, then API on 127.0.0.1:8080 + Vite on 5173 (/api proxied)
 npm run dev:server     # tsx watch, server only
 npm run dev:web        # vite only (needs the API running for /api)
@@ -63,6 +67,10 @@ npm run verify:ui      # needs: a running timescale, and `npx playwright install
 # real ones once written, and there is no way to separate them afterwards.
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run seed
 
+# The repo list is whatever the GitHub App installation reports; ORG_REPOS is gone and is fatal if
+# set. Under GITHUB_MODE=none the list falls back to the repos the database already holds rows for,
+# which is what keeps a seeded database browsable with no credential.
+
 # Compose is an infrastructure wrapper, not a shipping vehicle. It runs the same `npm run dev` as
 # above against the bind-mounted working tree: API on 127.0.0.1:8080 (tsx watch), Vite on 5173
 # (HMR), plus TimescaleDB and the OTEL collector. Edits are live with no rebuild — the image carries
@@ -80,7 +88,7 @@ docker compose --profile driver up -d driver
 # factory_dev holds real data; *_test, *_seed, *_synthetic, *_demo and *_e2e are disposable. The db
 # suite TRUNCATES its tables, so it refuses any database not named *_test — pointing it at
 # factory_dev would silently destroy backfilled history, and the tests would still pass. loadConfig
-# mirrors that: a process WITH a token refuses to run against any disposable name at all.
+# mirrors that: a process in GITHUB_MODE=app refuses to run against any disposable name at all.
 docker compose up -d timescale
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_test npm run test:db
 

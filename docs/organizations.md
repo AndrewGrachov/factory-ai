@@ -14,12 +14,14 @@ selecting between several, so the store still binds `orgId` at construction and 
 `'config'`. Mode 2 is what makes the org a property of the *caller* rather than of the process, and
 it has not been built.
 
-- **`ORG_ID` defaults to the literal `default`, and `ORG_NAME` to `GITHUB_OWNER`.** The id leads
-  every org-owned primary key, so deriving it from the owner would re-key every persisted row the
-  day the owner changed — the dashboard comes back empty and reads as data loss, not as a config
-  change. A *label* can be derived for free, because nothing keys on one. Requiring `ORG_ID` was
-  rejected: it breaks every existing `loadConfig({})` case, and that is the signal not to require,
-  not an obstacle to work around.
+- **`ORG_ID` defaults to the literal `default`, and `ORG_NAME` to `ORG_ID`.** The id leads every
+  org-owned primary key, so deriving it from anything that can change would re-key every persisted
+  row the day that thing changed — the dashboard comes back empty and reads as data loss, not as a
+  config change. A *label* can be derived for free, because nothing keys on one. The name used to
+  fall back to `GITHUB_OWNER`; there is no owner to fall back to now, because a GitHub App
+  installation reports each repository with its own, so the id is the only other name the process
+  has. Requiring `ORG_ID` was rejected: it breaks every existing `loadConfig({})` case, and that is
+  the signal not to require, not an obstacle to work around.
 - **The id is rejected, never normalised** (`^[a-z0-9][a-z0-9_-]{0,38}$`, no leading `__`). It is
   simultaneously a database key and a URL parameter, and a case-insensitive collision in a key is
   invisible: `Bellows` and `bellows` are two partitions that read as one. Silently lowercasing would

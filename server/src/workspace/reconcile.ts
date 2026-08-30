@@ -2,15 +2,18 @@ import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { Repo } from '../config.js';
+import { UUID, type Repo } from '../config.js';
 
 /**
- * Makes the organization's checkouts match its repo list: one clone per configured repo at
- * `<root>/<orgId>/<name>`.
+ * One clone, into one member's workspace at `<root>/<orgId>/<userId>/<name>`.
  *
- * Reconciles in one direction only. It never fetches an existing clone and never removes one for a
- * repo that left the list, because both would touch a working tree that may hold uncommitted work —
- * and the process that owns that work is a Claude Code session, not this one.
+ * This was `ensureWorkspace()`, which looped over the organization's configured repos at boot and
+ * cloned them all into one shared tree. Checkouts are per member now — chosen from the dashboard,
+ * cloned in the background — so the loop moved to `workspace/queue.ts` and what is left here is the
+ * single-repo operation and the rules about touching a working tree.
+ *
+ * Those rules are unchanged, and every one of them is about the same thing: the tree may hold
+ * uncommitted work belonging to a Claude Code session, and this process cannot tell.
  */
 
 const run = promisify(execFile);
@@ -18,25 +21,46 @@ const run = promisify(execFile);
 /** The variable the credential helper below reads. Never appears on a command line. */
 const TOKEN_VAR = 'GIT_WORKSPACE_TOKEN';
 
-export interface ReconcileResult {
-    readonly present: number;
-    readonly cloned: number;
-    readonly failed: number;
-}
+
+/** `present` means a checkout was already there and was left completely alone. */
+export type CloneOutcome = 'cloned' | 'present';
 
 export type GitRunner = (args: readonly string[], env: NodeJS.ProcessEnv) => Promise<void>;
 
-export interface ReconcileOptions {
+export interface CloneOptions {
     readonly root: string;
     readonly orgId: string;
-    readonly repos: readonly Repo[];
+    readonly userId: string;
+    readonly repo: Repo;
     /** Optional: without one, only public repos clone. A missing token is a supported state. */
     readonly token?: string | undefined;
     readonly log?: (message: string) => void;
     /** Test seam: lets the suite clone from a local bare repo over file://, with no network. */
-    readonly cloneUrl?: (repo: Repo) => string;
+    readonly cloneUrl?: ((repo: Repo) => string) | undefined;
     /** Test seam: lets the suite assert on argv and the child environment without running git. */
-    readonly run?: GitRunner;
+    readonly run?: GitRunner | undefined;
+}
+
+/**
+ * Where one member's checkouts live.
+ *
+ * The segment and the repo name sit at different depths, so neither can shadow the other — the same
+ * arrangement `<orgId>/<name>` had.
+ */
+export function workspaceDir(root: string, orgId: string, userId: string): string {
+    /*
+     * The uuid is asserted before it is joined into a path.
+     *
+     * 010_auth.sql chose a uuid for `app_user.id` partly for this: it "becomes a docker volume name
+     * component and a workspace path segment sitting next to repo names, and a uuid can collide
+     * with neither". Checking rather than trusting the caller is the posture `driver/src/docker.ts`
+     * takes with a session id before interpolating one into a command — that package keeps its own
+     * copy of the pattern because it depends on nothing, but inside the server there is one.
+     */
+    if (!UUID.test(userId)) {
+        throw new Error(`refusing to build a workspace path from a user id that is not a uuid: ${userId}`);
+    }
+    return join(root, orgId, userId);
 }
 
 function httpsUrl(repo: Repo): string {
@@ -70,61 +94,50 @@ function gitArgs(url: string, dest: string, authenticated: boolean): string[] {
     return [...args, 'clone', '--origin', 'origin', '--', url, dest];
 }
 
-export async function ensureWorkspace(options: ReconcileOptions): Promise<ReconcileResult> {
-    const { root, orgId, repos, token, log = () => {}, cloneUrl = httpsUrl } = options;
+export async function cloneRepo(options: CloneOptions): Promise<CloneOutcome> {
+    const { root, orgId, userId, repo, token, log = () => {}, cloneUrl = httpsUrl } = options;
     const exec = options.run ?? defaultRunner;
 
-    const orgDir = join(root, orgId);
-    log(`${orgDir}`);
+    const userDir = workspaceDir(root, orgId, userId);
+    const dest = join(userDir, repo.name);
+
+    if (existsSync(join(dest, '.git'))) {
+        log(`present ${repo.name}`);
+        return 'present';
+    }
+    // Thrown, not counted: a non-repo directory here means the root points at the wrong tree, and
+    // carrying on would scatter clones through somebody's home directory.
+    if (existsSync(dest)) {
+        throw new Error(`${dest} exists and is not a git checkout — refusing to clone over it`);
+    }
 
     const env: NodeJS.ProcessEnv = {
         ...process.env,
         // Without this a private repo with no usable credential blocks on stdin forever, and the
-        // clone never returns — a hang at boot rather than a reported failure.
+        // clone never returns — a hang rather than a reported failure.
         GIT_TERMINAL_PROMPT: '0',
         ...(token ? { [TOKEN_VAR]: token } : {}),
     };
 
-    let present = 0;
-    let cloned = 0;
-    let failed = 0;
+    // Cloned aside and renamed into place, so a process killed mid-clone leaves no partial tree at
+    // `dest`. One that did would be classified as "exists, not a checkout" on the next attempt and
+    // would then fail forever. `queue.ts` sweeps the leftover staging directories at boot.
+    const staging = `${dest}.tmp-${process.pid}`;
+    rmSync(staging, { recursive: true, force: true });
+    mkdirSync(userDir, { recursive: true });
 
-    for (const repo of repos) {
-        const dest = join(orgDir, repo.name);
-        if (existsSync(join(dest, '.git'))) {
-            present += 1;
-            log(`present ${repo.name}`);
-            continue;
-        }
-        // Thrown, not counted: a non-repo directory here means the root points at the wrong tree,
-        // and carrying on would scatter clones through somebody's home directory.
-        if (existsSync(dest)) {
-            throw new Error(`${dest} exists and is not a git checkout — refusing to clone over it`);
-        }
-
-        // Cloned aside and renamed into place, so a process killed mid-clone leaves no partial tree
-        // at `dest`. One that did would be classified as "exists, not a checkout" on the next boot
-        // and would then fail forever.
-        const staging = `${dest}.tmp-${process.pid}`;
+    log(`cloning ${repo.owner}/${repo.name}`);
+    const started = Date.now();
+    try {
+        await exec(gitArgs(cloneUrl(repo), staging, Boolean(token)), env);
+        renameSync(staging, dest);
+        log(`cloned ${repo.name} in ${Date.now() - started}ms`);
+        return 'cloned';
+    } catch (error) {
         rmSync(staging, { recursive: true, force: true });
-        mkdirSync(orgDir, { recursive: true });
-
-        log(`cloning ${repo.owner}/${repo.name}`);
-        const started = Date.now();
-        try {
-            await exec(gitArgs(cloneUrl(repo), staging, Boolean(token)), env);
-            renameSync(staging, dest);
-            cloned += 1;
-            log(`cloned ${repo.name} in ${Date.now() - started}ms`);
-        } catch (error) {
-            rmSync(staging, { recursive: true, force: true });
-            failed += 1;
-            // Reported and survived, like a failed prime: nothing on the read path needs a
-            // checkout, so an unreachable GitHub must not stop the stored figures being served.
-            log(`failed ${repo.name}: ${(error as Error).message.split('\n')[0]}`);
-        }
+        // Thrown, where the old boot-time reconcile counted a failure and carried on. It swallowed
+        // this because boot had nowhere to put a message; now there is a column called `error` and
+        // a page that shows it, so the caller decides.
+        throw error;
     }
-
-    log(`${present} present, ${cloned} cloned, ${failed} failed`);
-    return { present, cloned, failed };
 }

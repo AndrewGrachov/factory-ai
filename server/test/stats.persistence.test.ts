@@ -148,14 +148,17 @@ describe('a store failure degrades alone', () => {
         const store = memoryPrStore({ prs: samplePrs() });
         store.broken = true;
         const client = stubClient();
-        const h = await harness({ client, store, config: { syncTtlMs: 1 } });
+        const h = await harness({ client, store });
         app = h.app;
 
         await app.inject({ method: 'GET', url: '/api/stats' });
         await h.settle();
         expect(h.service.fetchState().error).toBeNull();
 
-        h.advance(10);
+        // Past the slot's TTL, which the service floors at a minute per measured repo. A 1ms TTL
+        // used to express this; it is not a state a running process can be in any more, because
+        // that floor moved out of loadConfig when the repo count started coming from GitHub.
+        h.advance(60_010);
         await app.inject({ method: 'GET', url: '/api/stats' });
         await h.settle();
         expect(client.prCalls).toBe(2);

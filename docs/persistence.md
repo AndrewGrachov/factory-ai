@@ -22,6 +22,15 @@ request rather than a 202.
   migration that read the config (seeding the organization row, the bootstrap admin, the
   `AUTH_MODE=none` stand-in account) live in `db/migrate.ts` beside `adoptOrg()`, for the reason
   `adoptOrg()` is there: a `.sql` file cannot see the config, and guessing wrong is silent.
+- **`011_user_workspace.sql` adds one table, `user_repo`.** Org-owned, because it carries a repo,
+  which is `005`'s rule stated literally. One table rather than two: a separate "workspace" row
+  would assert only that a user exists, and `app_user` already asserts that. A deselected repository
+  is **marked**, never deleted — the row is the only record that a checkout exists on disk, so
+  deleting it makes unbounded disk growth invisible. `on delete cascade` on the user, unlike
+  `job.created_by`'s `set null`: a job is an audit record that must outlive the person, while this
+  row describes a directory nobody can reach once the account is gone. The clone queue's restart
+  recovery assumes one dashboard process, and that assumption is written into the migration's
+  header along with the escape hatch — see [workspace.md](workspace.md).
 - **`migrate()` also reaps expired sessions**, at boot only. The read path checks `expires_at`
   regardless, so this is about the table not growing without bound on a deployment whose users never
   log out — not about enforcement.

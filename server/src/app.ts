@@ -5,10 +5,16 @@ import { registerAuth } from './auth/plugin.js';
 import type { AuthStore } from './auth/store.js';
 import type { AppConfig } from './config.js';
 import type { JobStore } from './db/job-store.js';
+import type { UserRepoStore } from './db/user-repo-store.js';
+import type { RepoSource } from './github/repo-source.js';
+import { createFactsCache } from './workspace/facts.js';
+import type { CloneQueue } from './workspace/queue.js';
+import { workspaceRoutes } from './routes/workspace.js';
 import { authRoutes } from './routes/auth.js';
 import { healthRoutes } from './routes/health.js';
 import { ingestRoutes } from './routes/ingest.js';
 import { jobRoutes } from './routes/jobs.js';
+import { repoRoutes } from './routes/repos.js';
 import { statsRoutes } from './routes/stats.js';
 import type { StatsService } from './stats-service.js';
 import type { TelemetryStore } from './telemetry/store.js';
@@ -16,10 +22,27 @@ import type { TelemetryStore } from './telemetry/store.js';
 export interface AppDeps {
     config: AppConfig;
     service: StatsService;
+    /**
+     * The repositories the GitHub App installation reports. Required, because under
+     * GITHUB_MODE=none it is a source that reports an empty list rather than an absent one — the
+     * picker then says "nothing is installed", which is the truth, where a missing route would say
+     * nothing at all.
+     */
+    repos: RepoSource;
     /** Absent unless there is somewhere to write, so the ingest routes simply do not exist. */
     store?: TelemetryStore | undefined;
     /** Same bargain: no job board without a store behind it, so the routes are not registered. */
     jobs?: JobStore | undefined;
+    /**
+     * Per-member checkouts. Same bargain again — without a store the routes do not exist.
+     *
+     * Note that an absent WORKSPACE ROOT is a different thing entirely: the routes still exist and
+     * answer 200 with `root: null`, so the page can say the feature is off. Only an absent STORE
+     * removes them, and that is the route tests' mode.
+     */
+    userRepos?: UserRepoStore | undefined;
+    /** Absent in the route tests, where nothing should start cloning. */
+    cloneQueue?: CloneQueue | undefined;
     /**
      * Absent means no auth at all — no hook, no /api/auth routes, every route open.
      *
@@ -59,8 +82,11 @@ function csp(dev: boolean): string {
 export async function buildApp({
     config,
     service,
+    repos,
     store,
     jobs,
+    userRepos,
+    cloneQueue,
     auth,
     identity,
     now = Date.now,
@@ -84,8 +110,22 @@ export async function buildApp({
     await app.register(healthRoutes(config));
     if (auth) await app.register(authRoutes({ config, store: auth, identity }));
     await app.register(statsRoutes(config, service, now));
+    await app.register(repoRoutes(repos));
     if (store) await app.register(ingestRoutes(store));
     if (jobs) await app.register(jobRoutes(jobs));
+    if (userRepos) {
+        await app.register(
+            workspaceRoutes({
+                config,
+                store: userRepos,
+                repos,
+                // One cache per app, not per request: the whole point of it is that a poll every
+                // two seconds does not become a `git log` and a directory walk every two seconds.
+                facts: createFactsCache(now),
+                queue: cloneQueue ?? null,
+            }),
+        );
+    }
 
     if (config.webRoot) {
         const { default: fastifyStatic } = await import('@fastify/static');

@@ -2,20 +2,21 @@
 # mean the same thing on every machine.
 #
 # playwright.config.ts points FACTORY_CONFIG here, which stops the upward discovery walk from
-# finding a developer's personal factory.toml at the repo root. That matters for one key in
-# particular: an EMPTY environment variable is not an override, so `GITHUB_TOKEN=''` in the
-# playwright env would NOT clear a token set in a personal file — and a token would make this run
-# fetch from GitHub and then refuse to boot against a disposable database. Absence has to come from
-# the file layer, not from the environment.
+# finding a developer's personal factory.toml at the repo root — that file would otherwise supply an
+# organization id and point the run at somebody's real data.
 #
-# Everything else the run needs (DATABASE_URL, ORG_ID, ORG_NAME) is set in playwright.config.ts,
-# where environment beats this file.
-
-[organization]
-repos = ["bellows.ai"]
+# It used to carry the absence of a credential, and that was its main job: an EMPTY environment
+# variable is not an override, so `GITHUB_TOKEN=''` in the playwright env could NOT clear a token
+# set in a personal file, and absence had to come from the file layer. GITHUB_MODE replaced that
+# with a real value rather than an absent one, so playwright.config.ts sets `none` directly and a
+# personal file cannot win against it.
+#
+# The repo list is gone with it. It comes from the GitHub App installation, and there is no
+# installation here — so the source falls back to the repos the seeded database holds rows for,
+# which is precisely what the page renders.
+#
+# Everything else the run needs (DATABASE_URL, ORG_ID, ORG_NAME, GITHUB_MODE) is set in
+# playwright.config.ts, where environment beats this file.
 
 [github]
-# No `token` key at all. Without one the process never fetches, and the page renders purely from
-# the synthetic rows `npm run seed` wrote.
-owner = "Bellows-AI"
 base_branch = "dev"

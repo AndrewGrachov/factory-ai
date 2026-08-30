@@ -18,10 +18,14 @@ unauthenticated request was remote code execution.
 - **`AUTH_MODE=none` is a supported state, and four things depend on it**: `npm run seed`,
   `npm run verify:ui`, `scripts/test-jobs.sh` and the route-test harness. There is also no offline
   way to obtain an OAuth client id, so requiring auth would make `git clone && npm run dev`
-  impossible. Same argument `docs/configuration.md` already makes for `GITHUB_TOKEN`. It is the
-  default, because a newly required variable that fails every existing case is the signal not to
-  require it — but `index.ts` logs unconditionally that every route is open, in the register of the
-  `[fetch] no GITHUB_TOKEN` line.
+  impossible. It is the default, because a newly required variable that fails every existing case is
+  the signal not to require it — but `index.ts` logs unconditionally that every route is open, in
+  the register of the `[fetch] GITHUB_MODE=none` line.
+  - **`GITHUB_MODE` defaults the other way, and the asymmetry is deliberate.** Both are explicit
+    enums whose wrong branch is fatal-and-named; they differ in which branch is the default,
+    because the cost of the wrong default differs. Landing in open-auth by accident is a security
+    failure; landing in fetches-nothing by accident is an empty dashboard that reads as data loss.
+    See [configuration.md](configuration.md).
 - **`none` refuses a non-loopback `HOST`**, which makes "open on a public interface" *inexpressible*
   rather than warned about — stronger than anything the bind address guaranteed on its own. The one
   hatch, `AUTH_ALLOW_PUBLIC_BIND=1`, exists because `docker/Dockerfile` sets `ENV HOST=0.0.0.0`:
@@ -181,8 +185,14 @@ Plus `POST /api/auth/logout` and `GET /api/auth/me`.
   and must never be derived from the request's `Host` header — that lets the caller choose the
   redirect target. `http://0.0.0.0:8080` is not somewhere a browser is ever sent back to, so guessing
   is worse than refusing.
-- **An OAuth App, not a GitHub App.** Do not conflate identity with the repo-read credential
-  `TokenProvider` supplies.
+- **An OAuth App for sign-in, and a SEPARATE GitHub App for repo-read.** Two registrations to set
+  up, deliberately. This file used to say "an OAuth App, not a GitHub App"; that was about not
+  conflating the two credentials, and the conclusion still holds now that both exist. Signing
+  somebody in needs zero scopes and reads only their numeric id and login. Reading repositories
+  needs installation permissions and is nothing to do with the person in front of the browser — one
+  credential doing both would mean every sign-in grants repository access, and would tie the
+  dashboard's ability to fetch to whoever happened to log in last. See
+  [configuration.md](configuration.md) for `GITHUB_MODE`.
 
 ## Who needs which credential
 
@@ -222,10 +232,16 @@ Plus `POST /api/auth/logout` and `GET /api/auth/me`.
 ## What this does not do
 
 - **Membership is not a sandbox.** Any member can still queue a command that an agent runs against
-  the organization's checkouts. This narrows "anyone who can reach the port" to "any member"; it does
-  not make the job board safe to hand out.
+  *their own* checkouts. This narrows "anyone who can reach the port" to "any member"; it does not
+  make the job board safe to hand out.
 - **There is still one organization per deployment.** `meta.organization.mode` remains the literal
   `'config'` and the topbar selector stays disabled — see `docs/organizations.md`. Sign-in checks a
   caller's membership against that one organization rather than selecting between several.
-- **`job.created_by` has no reader yet.** It is the audit trail, and it is the seam the per-user
-  Claude credential and per-user workspace work will read from `POST /api/jobs/claim`'s `userId`.
+- **Signing in now has a side effect on disk.** `ensureUserWorkspace` creates
+  `<root>/<orgId>/<userId>/` in the callback — a `mkdir`, nothing more. It cannot block the sign-in:
+  a failure logs, and `GET /api/workspace` calls the same function, so a session that got in without
+  one recovers on its first visit to the page. See [workspace.md](workspace.md).
+- **`job.created_by` has one reader now, and one still to come.** `POST /api/jobs/claim` turns it
+  into `workspacePath`, which is how a driver finds the author's checkouts without ever touching the
+  database. The per-user Claude credential is the half that has not arrived, and `userId` is still
+  reported on the claim for it.

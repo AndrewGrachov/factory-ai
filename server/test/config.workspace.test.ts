@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const DB = 'postgres://factory:factory@127.0.0.1:5432/factory_dev';
-const env = (extra: NodeJS.ProcessEnv = {}) => ({ DATABASE_URL: DB, ...extra });
+const env = (extra: NodeJS.ProcessEnv = {}) => ({ DATABASE_URL: DB, GITHUB_MODE: 'none', ...extra });
 
 describe('the workspace root', () => {
     it('is null unless one is configured', () => {
@@ -46,24 +46,19 @@ describe('the workspace root', () => {
         expect(loadConfig(env({ ORG_WORKSPACE_ROOT: '/srv/factory' })).workspaceRoot).toBe('/srv/factory');
     });
 
-    it('refuses two repos that would share one checkout directory', () => {
-        // The checkout is <root>/<orgId>/<name>, so two owners' same-named repos are one directory.
-        const vars = { ORG_REPOS: 'acme/widgets,other/widgets' };
-        expect(() => loadConfig(env({ ...vars, ORG_WORKSPACE_ROOT: '/srv/factory' }))).toThrow(
-            /share the checkout directory "widgets"/,
-        );
-        // Legal without a workspace: the two are distinct everywhere else, and a deployment that
-        // never clones should not start failing to boot over it.
-        expect(() => loadConfig(env(vars))).not.toThrow();
-    });
-
-    it('refuses a repo name that is not usable as a directory name', () => {
-        for (const name of ['-x', '.', '..']) {
-            expect(
-                () => loadConfig(env({ ORG_REPOS: `acme/${name}`, ORG_WORKSPACE_ROOT: '/srv/factory' })),
-                name,
-            ).toThrow(/cannot be checked out/);
-        }
+    it('no longer validates repo names, because it no longer knows any', () => {
+        /*
+         * `checkWorkspaceNames` used to live here and refuse `-x`, `.`, `..` and two owners' repos
+         * that share one checkout directory. It could, because the list was ORG_REPOS and the
+         * operator had typed it. Neither is true now: the list comes from the GitHub App
+         * installation, and a name this validator dislikes is one nobody here can rename.
+         *
+         * The rules did not go away — they moved to where the name is actually turned into a
+         * directory, which is PUT /api/workspace/repos and the `user_repo` check constraint behind
+         * it. See routes.workspace.test.ts. There the answer is a 400 naming the repo, rather than
+         * a deployment that will not boot.
+         */
+        expect(() => loadConfig(env({ ORG_WORKSPACE_ROOT: '/srv/factory' }))).not.toThrow();
     });
 
     it('names the TOML key, not the environment variable, when the file is at fault', () => {
@@ -71,7 +66,7 @@ describe('the workspace root', () => {
         writeFileSync(join(dir, 'factory.toml'), '[organization]\nworkspace_root = "work"\n');
         // loadConfig only knows env keys, so an unrewritten message would send the reader looking
         // for a variable they never set.
-        expect(() => resolveConfig({ env: { DATABASE_URL: DB }, cwd: dir })).toThrow(
+        expect(() => resolveConfig({ env: { DATABASE_URL: DB, GITHUB_MODE: 'none' }, cwd: dir })).toThrow(
             /from organization\.workspace_root in/,
         );
     });

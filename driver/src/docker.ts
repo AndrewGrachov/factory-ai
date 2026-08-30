@@ -40,6 +40,20 @@ export interface Runner {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * `<org>/<user id>` and nothing else, asserted before it is interpolated into a `docker run`.
+ *
+ * The board is not something this process trusts with a fragment of a command line — the same rule
+ * `remoteSessionArgs` applies to a session id. Here the stakes are higher: the value becomes the
+ * agent's working directory, and `..` in it would point at the parent of every member's tree.
+ *
+ * The two halves restate ORG_ID_PATTERN from server/src/config.ts and the uuid above. COPIED rather
+ * than imported: this package depends on nothing, deliberately (see AGENTS.md), and sharing a
+ * constant with the server would give a process that needs only `fetch` and `docker` the whole
+ * server dependency tree.
+ */
+const WORKSPACE_PATH = /^[a-z0-9][a-z0-9_-]{0,38}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * `docker exec` argv for reading the bridge record out of a running runner. Pure and exported for
  * the same reason dockerArgs is: it interpolates a value into a shell command, and that is worth
  * pinning in one place.
@@ -98,6 +112,24 @@ const AUTH_MOUNT = '/home/node/.claude';
  * Control session reports its state into a TUI rather than onto stdout, so there is nothing
  * parseable to scrape — and a runner that dies early would leave the job with no session at all.
  */
+/**
+ * The job's workspace, or a refusal. Exported so `loop.ts` can fail a job cleanly rather than
+ * letting `dockerArgs` throw halfway through building a command.
+ */
+export function workspacePathOf(job: BoardJob): string | null {
+    return job.workspacePath && WORKSPACE_PATH.test(job.workspacePath) ? job.workspacePath : null;
+}
+
+function workspacePath(job: BoardJob): string {
+    const path = workspacePathOf(job);
+    if (!path) {
+        throw new Error(
+            `refusing to run job ${job.id}: the board reported no usable workspace path (${job.workspacePath ?? 'null'})`,
+        );
+    }
+    return path;
+}
+
 export function dockerArgs(config: DriverConfig, job: BoardJob, session: RunSession): string[] {
     const args = [
         'run',
@@ -108,9 +140,15 @@ export function dockerArgs(config: DriverConfig, job: BoardJob, session: RunSess
         '--label',
         `factory.job=${job.id}`,
         '-e',
-        // The org's checkouts sit one directory down. A command-only job names no repo, so the
-        // agent starts at the org root and can see all of them.
-        `WORKDIR=${config.workspaceMount}/${config.orgId}`,
+        // The AUTHOR's checkouts sit one directory down. A command-only job names no repo, so the
+        // agent starts at the root of that person's workspace and can see everything they selected
+        // — and nothing anybody else selected.
+        //
+        // This used to be `<mount>/<orgId>`, one tree shared by every member. Neither `<mount>` nor
+        // `<mount>/<orgId>` is a safe fallback now: both are the PARENT of every member's tree, and
+        // handing that to a container that may be running --dangerously-skip-permissions is a
+        // cross-tenant read. So a job with no workspace fails instead — see loop.ts.
+        `WORKDIR=${config.workspaceMount}/${workspacePath(job)}`,
         '-v',
         `${config.workspaceVolume}:${config.workspaceMount}`,
     ];

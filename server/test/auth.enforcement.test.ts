@@ -110,6 +110,11 @@ describe('the route table', () => {
         ['/', 'open'],
         ['/index.html', 'open'],
         ['/assets/app-1234.js', 'open'],
+        // A client-side route, and the reason it is here is that it fails ONLY in production: Vite
+        // has its own history fallback in dev, so a wall on this path would be invisible until the
+        // baked image served it. The not-found handler in app.ts sends index.html for it, and the
+        // wall is on /api/* rather than on the document — see docs/auth.md.
+        ['/workspace', 'open'],
         ['/api/stats', 'user'],
         ['/api/refresh', 'user'],
         ['/api/jobs', 'user'],
@@ -123,6 +128,11 @@ describe('the route table', () => {
         [`/api/jobs/${JOB_ID}/complete`, 'worker'],
         ['/api/otlp/v1/logs', 'ingest'],
         ['/api/sessions/branch', 'ingest'],
+        // Both fall through to `user` rather than being listed anywhere, which is the point: the
+        // default is the safe one, so a new route is walled unless somebody deliberately opens it.
+        ['/api/repos', 'user'],
+        ['/api/workspace', 'user'],
+        ['/api/workspace/repos', 'user'],
     ])('classifies %s as %s', (path, expected) => {
         expect(requirementFor(path)).toBe(expected);
     });

@@ -21,7 +21,12 @@ export interface Cache<T> {
 }
 
 export interface CacheDeps<T> {
-    ttlMs: number;
+    /**
+     * A thunk is allowed because the PR slot's TTL is floored by the repo count, and that count is
+     * reported by the GitHub App installation rather than configured — so it is not known when the
+     * cache is built, and it can change while the process runs.
+     */
+    ttlMs: number | (() => number);
     produce: () => Promise<T>;
     now?: () => number;
 }
@@ -35,10 +40,11 @@ export interface CacheDeps<T> {
 export function createCache<T>({ ttlMs, produce, now = Date.now }: CacheDeps<T>): Cache<T> {
     let entry: CacheEntry<T> | null = null;
     let pending: Promise<CacheEntry<T>> | null = null;
+    const ttl = typeof ttlMs === 'function' ? ttlMs : () => ttlMs;
 
     return {
         peek: () => entry,
-        isStale: () => entry === null || now() - entry.fetchedAt >= ttlMs,
+        isStale: () => entry === null || now() - entry.fetchedAt >= ttl(),
         inFlight: () => pending !== null,
         refresh() {
             if (pending) return pending;

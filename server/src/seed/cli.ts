@@ -35,7 +35,16 @@ function databaseName(url: string): string {
     return new URL(url).pathname.replace(/^\//, '');
 }
 
-const { config } = resolveConfig();
+/*
+ * GITHUB_MODE=none, forced.
+ *
+ * A seeding process must never hold a fetching credential — that is the same instinct as the
+ * disposable-database refusal below, one step earlier: a process that could both invent pull
+ * requests and fetch real ones is one environment variable away from mixing them. It also keeps
+ * `npm run seed` working with no App registered, which is what the whole no-credential path exists
+ * for. Not overridable, because there is no reason to seed while fetching.
+ */
+const { config } = resolveConfig({ env: { ...process.env, GITHUB_MODE: 'none' } });
 
 if (!config.databaseUrl) {
     console.error('seed requires DATABASE_URL (or telemetry.database_url in factory.toml)');
@@ -54,7 +63,15 @@ if (!DISPOSABLE.test(name)) {
     process.exit(1);
 }
 
-const repo = config.repoNames[0] as string;
+/*
+ * Which repo the synthetic rows are stamped with.
+ *
+ * Its own variable now that there is no configured repo list to take the first entry of. It has to
+ * agree with what the dashboard measures, and the dashboard asks the GitHub App installation — so
+ * for a seeded database the agreement runs the other way: seed picks a name, and whoever reads the
+ * result runs with GITHUB_MODE=none so that nothing overrules it. `verify:ui` does exactly that.
+ */
+const repo = process.env.SEED_REPO?.trim() || 'Bellows-AI/bellows.ai';
 const now = new Date();
 const data = generate({ repo, baseBranch: config.baseBranch, now });
 

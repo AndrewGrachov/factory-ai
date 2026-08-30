@@ -3,6 +3,8 @@ import type { BoardJob } from '../src/board.js';
 import { loadDriverConfig } from '../src/config.js';
 import { containerName, dockerArgs, parseRemoteSessionId, remoteSessionArgs } from '../src/docker.js';
 
+const USER = '44444444-4444-4444-8444-444444444444';
+
 const job: BoardJob = {
     id: '11111111-1111-4111-8111-111111111111',
     command: 'fix the failing build',
@@ -10,6 +12,8 @@ const job: BoardJob = {
     leaseToken: '22222222-2222-4222-8222-222222222222',
     leaseExpiresAt: '2026-08-29T12:05:00.000Z',
     resumeSessionId: null,
+    userId: USER,
+    workspacePath: `bellows/${USER}`,
 };
 
 const SESSION = '33333333-3333-4333-8333-333333333333';
@@ -40,10 +44,39 @@ describe('the docker run arguments', () => {
         );
     });
 
-    it('mounts the checkouts volume and starts at the organization root', () => {
-        expect(args({ ORG_ID: 'bellows' })).toEqual(
-            expect.arrayContaining(['-v', 'factory-ai_workspaces:/workspaces', 'WORKDIR=/workspaces/bellows']),
+    it('mounts the checkouts volume and starts at the AUTHOR\'s workspace root', () => {
+        // Was `/workspaces/<orgId>`, built from the driver's own ORG_ID — one tree every member's
+        // agent shared. The board sends the path now, because it owns the layout; this process
+        // only knows where the volume is mounted.
+        expect(args()).toEqual(
+            expect.arrayContaining([
+                '-v',
+                'factory-ai_workspaces:/workspaces',
+                `WORKDIR=/workspaces/bellows/${USER}`,
+            ]),
         );
+    });
+
+    it('refuses a workspace path that is not <org>/<uuid>', () => {
+        /*
+         * The board is not something this process trusts with a fragment of a command line — the
+         * same rule remoteSessionArgs applies to a session id, and the stakes are higher here:
+         * the value becomes the agent's working directory, and `..` in it points at the parent of
+         * every member's tree.
+         */
+        for (const path of [
+            '../../etc',
+            'bellows/../../etc',
+            'bellows/not-a-uuid',
+            `/absolute/${USER}`,
+            `bellows/${USER}/extra`,
+            null,
+        ]) {
+            expect(
+                () => dockerArgs(loadDriverConfig({}), { ...job, workspacePath: path }, { id: SESSION, resume: false }),
+                String(path),
+            ).toThrow(/no usable workspace path/);
+        }
     });
 
     // The same discipline the workspace reconcile applies to the git token: `-e NAME` makes docker

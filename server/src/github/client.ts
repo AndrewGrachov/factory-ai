@@ -22,6 +22,7 @@ import {
     UPDATED_DESC,
 } from './queries.js';
 import type { RawPullRequest } from './schema.js';
+import { fullName, type RepoSource } from './repo-source.js';
 import type { TokenProvider } from './token.js';
 
 const ENDPOINT = 'https://api.github.com/graphql';
@@ -64,13 +65,23 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface ClientDeps {
     config: AppConfig;
-    tokens: TokenProvider;
+    /** Which repositories to walk. Reported by the App installation, so it is read per call. */
+    repos: RepoSource;
+    /**
+     * Absent under GITHUB_MODE=none, and then every method here refuses before building a request.
+     * An optional dependency rather than a provider that throws: a process with no credential
+     * cannot fetch, and saying so in the type is stronger than saying it in an error message.
+     */
+    tokens?: TokenProvider | undefined;
     fetch?: typeof globalThis.fetch;
 }
 
-export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }: ClientDeps): ForgeClient {
-    const { repos, baseBranch } = config;
-    const fullName = (repo: Repo) => `${repo.owner}/${repo.name}`;
+export function createGitHubClient({ config, repos, tokens, fetch = globalThis.fetch }: ClientDeps): ForgeClient {
+    const { baseBranch } = config;
+
+    // The list as of this call. Every method below walks it once, and the source caches, so this is
+    // a snapshot read rather than a request per repo.
+    const measured = () => repos.snapshot();
 
     async function graphql<T>(
         query: string,
@@ -78,6 +89,15 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
         repo: Repo,
         attempts = 3,
     ): Promise<T> {
+        if (!tokens) {
+            // Before any request is built, which is what makes GITHUB_MODE=none a mode rather than
+            // a failure: nothing reaches the network, the stored figures still render, and `meta`
+            // carries this sentence instead of a network error nobody can act on.
+            throw new GitHubError(
+                'GITHUB_MODE is "none", so this deployment has no GitHub credential and serves only what is already stored',
+                'TOKEN_REJECTED',
+            );
+        }
         const token = await tokens.get();
         let lastError: GitHubError | undefined;
 
@@ -202,7 +222,7 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
             // Sequential, not Promise.all: the point of the rate-limit budget is that it is
             // shared, and N concurrent paginations would burn it in a burst that the TTL floor
             // cannot smooth out.
-            for (const repo of repos) {
+            for (const repo of measured()) {
                 const name = fullName(repo);
                 const stopAt = mode === 'incremental' ? cutoff[name] : undefined;
                 // A repo with no watermark has never been synced, so there is nothing to be
@@ -265,7 +285,7 @@ export function createGitHubClient({ config, tokens, fetch = globalThis.fetch }:
             const results: RepoBranchHistory[] = [];
             let scanned = 0;
 
-            for (const repo of repos) {
+            for (const repo of measured()) {
                 const name = fullName(repo);
                 const from = since[name];
                 if (!from) {

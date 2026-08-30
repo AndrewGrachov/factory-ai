@@ -20,9 +20,22 @@ const E2E_LOGIN = 'e2e-user';
 const shared = {
     WEB_ROOT: `${root}web/dist`,
     TELEMETRY_SOURCE: 'postgres',
-    // Pinned, because cwd is the repo root and a developer's gitignored factory.toml is discovered
-    // from there. See the note in e2e/factory.e2e.toml for why absence of a token has to come from
-    // the file layer rather than from an empty environment variable.
+    /*
+     * The whole reason this run is offline.
+     *
+     * GITHUB_MODE defaults to `app`, so a boot with no App credentials is fatal — deliberately, so
+     * that a deployment cannot arrive at "fetches nothing" by forgetting a variable. This check has
+     * to arrive there ON PURPOSE, and this is it typed out. Nothing is fetched and nothing is
+     * cloned; the repo list falls back to the repos the seeded database holds rows for, which is
+     * exactly what the page is rendering.
+     *
+     * A literal here rather than in the config file, unlike the absence of a token it replaces: an
+     * empty environment variable is not an override, but a non-empty one is, so this cannot be
+     * defeated by a developer's personal factory.toml the way `token` could.
+     */
+    GITHUB_MODE: 'none',
+    // Still pinned, because cwd is the repo root and a developer's gitignored factory.toml is
+    // discovered from there — it would otherwise supply an ORG_ID and point this run at their data.
     FACTORY_CONFIG: `${root}e2e/factory.e2e.toml`,
 };
 
@@ -30,11 +43,11 @@ const shared = {
  * The built SPA is served by the API rather than by Vite, so the suite exercises the same
  * single-origin arrangement as production and needs no proxy rule.
  *
- * It stays offline — no token, no quota, no network — but no longer by replaying an HTTP payload.
- * The database is the only source the app reads, so the check seeds a disposable one and browses
- * that. Deliberately NO GITHUB_TOKEN: without it nothing is ever fetched (envTokenProvider throws
- * before a request is built), so the page renders purely from what was seeded, and `loadConfig`
- * permits the disposable database precisely because nothing can be lost to it.
+ * It stays offline — no credential, no quota, no network — but no longer by replaying an HTTP
+ * payload. The database is the only source the app reads, so the check seeds a disposable one and
+ * browses that. Deliberately GITHUB_MODE=none: nothing is constructed to fetch with, so the page
+ * renders purely from what was seeded, and `loadConfig` permits the disposable database precisely
+ * because nothing can be lost to it.
  *
  * Requires a running container:  docker compose up -d timescale
  */
@@ -53,12 +66,15 @@ export default defineConfig({
     projects: [
         {
             name: 'chromium',
-            testIgnore: /auth\.spec\.ts/,
+            testIgnore: /(auth|workspace)\.spec\.ts/,
             use: { ...devices['Desktop Chrome'] },
         },
         {
+            // Both specs need a signed-in member, and workspace.spec.ts also needs a server with a
+            // real ORG_WORKSPACE_ROOT — which the open board deliberately does not have, so that a
+            // picker never appears in the visual check.
             name: 'auth',
-            testMatch: /auth\.spec\.ts/,
+            testMatch: /(auth|workspace)\.spec\.ts/,
             use: { ...devices['Desktop Chrome'], baseURL: `http://127.0.0.1:${AUTH_PORT}` },
         },
     ],
@@ -125,6 +141,12 @@ export default defineConfig({
                 // An UNCLAIMED invite. First sign-in binds it, which is the half of the flow most
                 // worth driving in a browser.
                 SEED_INVITE_LOGIN: E2E_LOGIN,
+                // A REAL workspace root, so signing in provisions a real directory and the
+                // Workspace page has something to report. Under artifacts/ and never under $HOME:
+                // this run creates directories, and it must not do that anywhere a developer
+                // keeps work. The open board above deliberately has none, which is what keeps a
+                // picker from ever appearing in the visual check.
+                ORG_WORKSPACE_ROOT: `${root}artifacts/e2e-workspaces`,
             },
             timeout: 180_000,
             reuseExistingServer: false,

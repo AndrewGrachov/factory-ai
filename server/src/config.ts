@@ -8,6 +8,62 @@ export interface Repo {
 }
 
 /**
+ * "owner/name" — the form stamped onto every stored PR, and the key everything joins on.
+ *
+ * Next to the type rather than in `github/`, because `db/` and `routes/` need it too and reaching
+ * into the GitHub adapter for a string join would be a layering inversion.
+ */
+export const fullName = (repo: Repo): string => `${repo.owner}/${repo.name}`;
+
+/**
+ * The credential the repo-read path uses, and the source of the repo list itself.
+ *
+ * A union for the same reason AuthConfig is one: "half-configured App" is unrepresentable rather
+ * than merely rejected, and the mode is an EXPLICIT enum never inferred from whether an app id
+ * happens to be set. `GITHUB_APP_IDD` must leave a deployment loudly unconfigured, not silently
+ * reading nothing.
+ *
+ * This replaced a personal access token. The App is not just a different credential: an installation
+ * also *reports* which repositories it can see, which is what removed ORG_REPOS. There is no longer
+ * an operator-maintained repo list to drift from what the credential can actually reach.
+ */
+export type GitHubConfig =
+    | {
+          /**
+           * Nothing is fetched from GitHub and nothing is cloned; the dashboard serves whatever is
+           * already in the database. Four things depend on this — `npm run seed`,
+           * `npm run verify:ui`, `npm run test:jobs` and the route-test harness — and there is no
+           * offline way to obtain an App private key, so requiring one would make
+           * `git clone && npm run dev` impossible.
+           *
+           * It is NOT the default, and nothing degrades into it: an incomplete `app` is fatal. This
+           * is a sentence an operator types, and index.ts logs it unconditionally.
+           */
+          readonly mode: 'none';
+      }
+    | {
+          readonly mode: 'app';
+          /**
+           * A string, not a number. GitHub now issues client ids of the form `Iv23li…` that are
+           * accepted as the JWT `iss`, and the numeric form has to survive being one too.
+           */
+          readonly appId: string;
+          /** Null discovers it from `GET /app/installations`, which is fatal on 0 or more than 1. */
+          readonly installationId: string | null;
+          /**
+           * The PEM itself, never a path — `loadConfig` does no I/O. `GITHUB_APP_PRIVATE_KEY_FILE`
+           * is read by `resolveConfig`, which already does every byte of I/O in this system, and
+           * merged in before this validator sees it.
+           *
+           * Only the shape is checked here. `createPrivateKey()` runs when the token provider is
+           * constructed, so a well-shaped but invalid key is still fatal at boot rather than at the
+           * first fetch.
+           */
+          readonly privateKeyPem: string;
+          readonly apiUrl: string;
+      };
+
+/**
  * How a request names its caller.
  *
  * A union rather than a record of optionals, so "half-configured auth" is unrepresentable rather
@@ -85,8 +141,13 @@ export interface AppConfig {
     readonly orgId: string;
     /** Display only, never a key — which is why it has no character rules and the id does. */
     readonly orgName: string;
-    /** The landing page reports every one of these combined. Never empty. */
-    readonly repos: readonly Repo[];
+    /**
+     * There is no `repos` here any more. The list is whatever the App installation reports, which
+     * is a network read and therefore async — see `RepoSource`. Keeping a configured copy beside it
+     * would be a second roster to hold in step, which is the thing `auth.auto_join_github_org`
+     * already exists to avoid one level up.
+     */
+    readonly github: GitHubConfig;
     readonly baseBranch: string;
     readonly bots: readonly string[];
     /**
@@ -111,14 +172,8 @@ export interface AppConfig {
     readonly databaseUrl: string;
     readonly telemetryTtlMs: number;
     /**
-     * "owner/name" for each configured repo — the form the hook reports and the form stamped onto
-     * every PR. Derived rather than configurable: a separate telemetry repo list is a second
-     * source of truth that silently drops sessions the moment it drifts from `repos`.
-     */
-    readonly repoNames: readonly string[];
-    /**
-     * Where the organization's checkouts live: one clone per configured repo at
-     * `<workspaceRoot>/<orgId>/<name>`.
+     * Where a member's checkouts live: one clone per repo they selected, at
+     * `<workspaceRoot>/<orgId>/<userId>/<name>`.
      *
      * `null` — the feature off — is the default, not a path under `$HOME`. A default would make an
      * upgrade start cloning gigabytes for an operator who changed nothing, and would turn a
@@ -136,10 +191,16 @@ export interface AppConfig {
 // hot loop — unlike the sync floor below, which is rationing a rate-limit budget.
 const MIN_TELEMETRY_TTL_SECONDS = 5;
 
-// An incremental sync is ~2-5 pages, so ~5-10 points: 60s per repo costs ~600 points/hour/repo,
-// about 12% of the 5000 budget, for a dashboard that is never more than a minute stale. The
-// expensive full walk is not gated by this at all — see FULL_RESYNC_INTERVAL_MS.
-const MIN_SYNC_TTL_SECONDS_PER_REPO = 60;
+/**
+ * An incremental sync is ~2-5 pages, so ~5-10 points: 60s per repo costs ~600 points/hour/repo,
+ * about 12% of the 5000 budget, for a dashboard that is never more than a minute stale. The
+ * expensive full walk is not gated by this at all — see FULL_RESYNC_INTERVAL_MS.
+ *
+ * Exported, and applied by the stats service rather than here, because the repo count is no longer
+ * known at boot: the installation reports it. `loadConfig` can still floor SYNC_TTL_SECONDS at one
+ * repo's worth, which is all it can honestly check.
+ */
+export const MIN_SYNC_TTL_SECONDS_PER_REPO = 60;
 
 /**
  * A database whose name ends here is disposable — the db suite truncates it, and `npm run seed`
@@ -168,6 +229,16 @@ const DEFAULT_ORG_ID = 'default';
  * — a familiar cap that keeps the key short.
  */
 const ORG_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,38}$/;
+
+/**
+ * A uuid, as `app_user.id` and `job.id` are.
+ *
+ * Beside `ORG_ID_PATTERN` because it is the same kind of thing — the shape of an identifier that
+ * ends up in a path, a URL and a shell command — and because both `routes/` and `workspace/`
+ * legitimately depend on this module, where neither should depend on the other. `driver/` keeps its
+ * own copy, deliberately: that package depends on nothing.
+ */
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Reserved: `005_organizations.sql` backfills pre-organization rows to `__unclaimed__` and adopts
@@ -224,31 +295,62 @@ function workspaceRootOf(env: NodeJS.ProcessEnv): string | null {
 }
 
 /**
- * A checkout is `<root>/<orgId>/<name>`, so both halves have to survive being a bare path segment.
- * `orgId` already does — ORG_ID_PATTERN forbids dots and slashes for exactly this — but a repo name
- * has never been constrained, because until now it was only ever a string in an API path.
+ * `[github]`, or the one field `none` mode has.
  *
- * Checked only when a workspace root is set: these names are legal everywhere else, and a
- * deployment that never clones should not start failing to boot over one.
+ * Pure, like the rest of loadConfig. In particular the private key arrives here already read:
+ * GITHUB_APP_PRIVATE_KEY_FILE is resolved by config-file.ts, so this validator never learns that a
+ * file exists — the same rule that keeps `loadConfig({})` meaning one thing on every machine.
  */
-function checkWorkspaceNames(repos: readonly Repo[]): void {
-    const seen = new Map<string, string>();
-    for (const repo of repos) {
-        const { name } = repo;
-        // A leading "-" is read by git as an option, not a path.
-        if (name === '.' || name === '..' || name.includes('/') || name.startsWith('-')) {
-            throw new Error(
-                `ORG_REPOS entry "${repo.owner}/${name}" cannot be checked out: with ORG_WORKSPACE_ROOT set, a repo name becomes a directory name`,
-            );
-        }
-        const first = seen.get(name);
-        if (first) {
-            throw new Error(
-                `ORG_REPOS lists "${first}/${name}" and "${repo.owner}/${name}", which share the checkout directory "${name}" — with ORG_WORKSPACE_ROOT set, one would overwrite the other`,
-            );
-        }
-        seen.set(name, repo.owner);
+function loadGitHub(env: NodeJS.ProcessEnv): GitHubConfig {
+    const mode = env.GITHUB_MODE?.trim() || 'app';
+    if (mode !== 'none' && mode !== 'app') {
+        throw new Error(`GITHUB_MODE must be "app" or "none", got "${env.GITHUB_MODE}"`);
     }
+    if (mode === 'none') return Object.freeze({ mode });
+
+    // Named individually rather than as "the App is incomplete": the operator has one key to fix
+    // and should not have to diff the example file to find out which.
+    const appId = env.GITHUB_APP_ID?.trim();
+    const privateKey = env.GITHUB_APP_PRIVATE_KEY?.trim();
+    for (const [label, value] of [
+        ['GITHUB_APP_ID', appId],
+        ['GITHUB_APP_PRIVATE_KEY', privateKey],
+    ] as const) {
+        if (!value) {
+            throw new Error(
+                `GITHUB_MODE is "app" but ${label} is not set. A half-configured App is fatal rather than falling back to fetching nothing, which would present as an empty dashboard rather than as a missing credential. Set GITHUB_MODE=none to serve stored data deliberately.`,
+            );
+        }
+    }
+
+    // Base64 is accepted because a PEM is multi-line and both `--env-file` and compose handle a
+    // one-line value far better. Discriminated by the header rather than by a flag: a value that
+    // already looks like a PEM is one, and there is no third thing it could be.
+    let pem = privateKey!;
+    if (!pem.includes('-----BEGIN')) {
+        pem = Buffer.from(pem, 'base64').toString('utf8').trim();
+    }
+    if (!pem.startsWith('-----BEGIN') || !pem.includes('PRIVATE KEY-----')) {
+        throw new Error(
+            'GITHUB_APP_PRIVATE_KEY is not a PEM private key. Paste the contents of the .pem GitHub gave you when you generated the key, or its base64, or point GITHUB_APP_PRIVATE_KEY_FILE at the file.',
+        );
+    }
+
+    const installationId = env.GITHUB_APP_INSTALLATION_ID?.trim() || null;
+    if (installationId !== null && !/^\d+$/.test(installationId)) {
+        throw new Error(`GITHUB_APP_INSTALLATION_ID must be a number, got "${installationId}"`);
+    }
+
+    return Object.freeze({
+        mode,
+        appId: appId!,
+        installationId,
+        privateKeyPem: pem,
+        // Environment only, and deliberately absent from config-file.ts's KEYS, for the same reason
+        // the three GITHUB_OAUTH_*_URL overrides are: a configurable API host in a file that ships
+        // with a deployment is somewhere to send a credential. index.ts logs it when it is set.
+        apiUrl: (env.GITHUB_API_URL?.trim() || 'https://api.github.com').replace(/\/+$/, ''),
+    });
 }
 
 /**
@@ -380,17 +482,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         );
     }
 
-    const owner = env.GITHUB_OWNER ?? 'Bellows-AI';
-
-    // GITHUB_REPOS held this list until the organization took ownership of it. Fatal rather than
-    // ignored — the one deliberate exception to "an unknown environment variable is ignored", and
-    // for the very reason that rule is stated: an ignored GITHUB_REPOS quietly reverts a two-repo
-    // dashboard to one repo and still renders, indistinguishable from a repo genuinely removed.
-    // An empty value is not an override, here as everywhere, or a bare `GITHUB_REPOS=` line left
-    // in .env would refuse to boot.
-    if (env.GITHUB_REPOS) {
+    /*
+     * The three keys the GitHub App replaced.
+     *
+     * Fatal rather than ignored, like GITHUB_REPOS and CACHE_TTL_SECONDS before them and for the
+     * same reason: each one used to decide what the page was made of, so an ignored one boots a
+     * dashboard whose operator believes it is reading something else. An empty value is not an
+     * override, here as everywhere, or a bare `GITHUB_TOKEN=` left in .env would refuse to boot —
+     * which matters, because docker-compose passes exactly that whenever the host has no token.
+     */
+    if (env.GITHUB_TOKEN) {
         throw new Error(
-            'GITHUB_REPOS has moved to ORG_REPOS: the organization owns the repo list now. Rename the variable, or move the line into an [organization] table in factory.toml.',
+            'GITHUB_TOKEN is no longer supported: the repo-read credential is a GitHub App installation now, which also reports which repositories it can see. Set GITHUB_MODE=app with GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY, or GITHUB_MODE=none to serve stored data. See docs/configuration.md.',
+        );
+    }
+    if (env.GITHUB_REPOS || env.ORG_REPOS) {
+        throw new Error(
+            `${env.ORG_REPOS ? 'ORG_REPOS' : 'GITHUB_REPOS'} is no longer supported: the repo list is whatever the GitHub App installation reports, and each member chooses which of those to check out from the dashboard. Remove the line; install the App on the repositories you want measured instead. See GET /api/repos.`,
+        );
+    }
+    if (env.GITHUB_OWNER) {
+        throw new Error(
+            'GITHUB_OWNER is no longer supported: the installation reports each repository with its own owner, so there is no default owner for a bare name to take. Remove the line. Use ORG_NAME to change what the page calls this organization.',
         );
     }
 
@@ -400,32 +513,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
             `ORG_ID must be 1-39 characters of lowercase letters, digits, "-" or "_", starting with a letter or digit, and may not begin with "__" — it is a database key and a URL parameter, so it is rejected rather than normalised — got "${orgId}"`,
         );
     }
-    // Falls back to the GitHub owner, not to the id: a deployment that sets nothing shows
-    // "Bellows-AI" in the selector rather than the word "default", which reads as a bug.
-    // Empty is unset, because an empty name renders an invisible control.
-    const orgName = env.ORG_NAME?.trim() || owner;
-
-    const names = env.ORG_REPOS
-        ? env.ORG_REPOS.split(',')
-              .map((entry) => entry.trim())
-              .filter(Boolean)
-        : ['bellows.ai'];
-    if (!names.length) throw new Error('ORG_REPOS lists no repositories');
-    // A bare name takes GITHUB_OWNER; a qualified "other-owner/name" keeps its own. So the
-    // organization's repo list is not confined to one GitHub owner — a Factory organization is not
-    // a GitHub organization, and `organization.id` has nothing to do with `github.owner`.
-    const repos: Repo[] = names.map((entry) => {
-        const slash = entry.indexOf('/');
-        if (slash === -1) return { owner, name: entry };
-        const [entryOwner, entryName] = [entry.slice(0, slash), entry.slice(slash + 1)];
-        if (!entryOwner || !entryName || entryName.includes('/')) {
-            throw new Error(`ORG_REPOS entry "${entry}" must be "name" or "owner/name"`);
-        }
-        return { owner: entryOwner, name: entryName };
-    });
+    // Falls back to the id, where it used to fall back to GITHUB_OWNER. There is no owner to fall
+    // back to any more — an installation reports many — and the id is the only other name this
+    // process has for the organization. Empty is unset, because an empty name renders an invisible
+    // control.
+    const orgName = env.ORG_NAME?.trim() || orgId;
 
     const workspaceRoot = workspaceRootOf(env);
-    if (workspaceRoot) checkWorkspaceNames(repos);
 
     // CACHE_TTL_SECONDS floored the slot at 300s per repo because every refresh was a full walk.
     // With history always persisted, the ordinary refresh is incremental and SYNC_TTL_SECONDS is
@@ -449,11 +543,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         throw new Error(`TELEMETRY_TTL_SECONDS must be at least ${MIN_TELEMETRY_TTL_SECONDS}`);
     }
 
-    const minSyncTtl = MIN_SYNC_TTL_SECONDS_PER_REPO * repos.length;
-    const syncTtlSeconds = int(env.SYNC_TTL_SECONDS, Math.max(60, minSyncTtl), 'SYNC_TTL_SECONDS');
-    if (syncTtlSeconds < minSyncTtl) {
+    // Floored at one repo's worth, which is all this validator can honestly check: the repo count
+    // comes from the installation and is not known until something has asked GitHub. The stats
+    // service raises the effective TTL once it does know — see `effectiveSyncTtlMs`.
+    const syncTtlSeconds = int(env.SYNC_TTL_SECONDS, MIN_SYNC_TTL_SECONDS_PER_REPO, 'SYNC_TTL_SECONDS');
+    if (syncTtlSeconds < MIN_SYNC_TTL_SECONDS_PER_REPO) {
         throw new Error(
-            `SYNC_TTL_SECONDS must be at least ${minSyncTtl} for ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}; an incremental sync still costs a few rate-limit points per repo`,
+            `SYNC_TTL_SECONDS must be at least ${MIN_SYNC_TTL_SECONDS_PER_REPO}; an incremental sync still costs a few rate-limit points per repo`,
         );
     }
 
@@ -464,23 +560,26 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         );
     }
 
+    const github = loadGitHub(env);
+
     /*
-     * A missing token is a supported state, not an error.
+     * `GITHUB_MODE=none` is a supported state, not an error.
      *
      * It means this process does not fetch: it serves whatever is already in the database. That is
      * what lets the browser check and a seeded demo run with no credentials and no network, and it
-     * is honest on the page — the fetch fails fast with a named reason (envTokenProvider throws
-     * before any request is built) while the persisted figures still render.
+     * is honest on the page — nothing is constructed to fetch with, and the persisted figures still
+     * render with the reason named in `meta`.
      *
      * The pairing below is the one combination that must stay impossible. A disposable database is
      * one that `npm run test:db` truncates and `npm run seed` fills with invented pull requests;
      * pointing a *fetching* process at one means real history is either destroyed on the next test
-     * run or interleaved with synthetic rows that no later query can tell apart.
+     * run or interleaved with synthetic rows that no later query can tell apart. Re-keyed from
+     * GITHUB_TOKEN to the mode: same guard, same reasoning, new name for "this process fetches".
      */
     const name = databaseName(databaseUrl) ?? '';
-    if (env.GITHUB_TOKEN && DISPOSABLE_DATABASE.test(name)) {
+    if (github.mode === 'app' && DISPOSABLE_DATABASE.test(name)) {
         throw new Error(
-            `DATABASE_URL points at "${name}", which is disposable: the db suite truncates it and \`npm run seed\` writes synthetic pull requests into it. Refusing to persist real fetched history there. Use a database without a _test/_seed/_synthetic/_demo/_e2e suffix, or unset GITHUB_TOKEN to read what is already stored.`,
+            `DATABASE_URL points at "${name}", which is disposable: the db suite truncates it and \`npm run seed\` writes synthetic pull requests into it. Refusing to persist real fetched history there. Use a database without a _test/_seed/_synthetic/_demo/_e2e suffix, or set GITHUB_MODE=none to read what is already stored.`,
         );
     }
 
@@ -498,7 +597,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     return Object.freeze({
         orgId,
         orgName,
-        repos: Object.freeze(repos.map((repo) => Object.freeze(repo))),
+        github,
         baseBranch: env.BASE_BRANCH ?? 'dev',
         bots: Object.freeze(bots),
         syncTtlMs: syncTtlSeconds * 1000,
@@ -508,7 +607,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         telemetrySource,
         databaseUrl,
         telemetryTtlMs: telemetryTtlSeconds * 1000,
-        repoNames: Object.freeze(repos.map((repo) => `${repo.owner}/${repo.name}`)),
         workspaceRoot,
         auth: loadAuth(env, host, port),
     });

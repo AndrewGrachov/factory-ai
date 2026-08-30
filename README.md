@@ -20,36 +20,43 @@ simplifying one silently makes the number wrong.
 
 ## Running it
 
-A database is required: it is the only source the dashboard reads. A GitHub token is not — without
-one nothing is fetched and whatever is already stored still renders.
+A database is required: it is the only source the dashboard reads. A GitHub App is required too,
+unless you say otherwise — `GITHUB_MODE` defaults to `app` and is fatal without an App id and
+private key. `GITHUB_MODE=none` fetches nothing and renders whatever is already stored. That is a
+supported way to run, but one you have to ask for: a dashboard that silently fetches nothing looks
+like data loss rather than like a missing credential.
 
 ```bash
 npm install
 docker compose up -d timescale        # required; there is no in-memory mode
 
-# No token: fill a disposable database with synthetic data and browse that.
+# No credential: fill a disposable database with synthetic data and browse that.
 docker compose exec timescale psql -U factory -d postgres -c 'create database factory_seed'
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run seed
-DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run dev
+GITHUB_MODE=none DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run dev
 
 # Live, via the config file
-cp factory.toml.example factory.toml && chmod 600 factory.toml   # set github.token
+cp factory.toml.example factory.toml && chmod 600 factory.toml   # set [github] app_id, private_key
 npm run dev
 
 # Live, via the environment instead — it overrides factory.toml wherever they disagree
-cp .env.example .env   # set GITHUB_TOKEN
+cp .env.example .env   # set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY
 npm run dev
 
-# The organization owns the repo list, and every repo it lists is reported combined on one page.
-# Cost is ~243 rate-limit points per repo, so the sync TTL floor rises to 60s x the repo count.
+# The organization is identity only. There is no repo list here any more.
 #   [organization]
-#   id    = "bellows-ai"
-#   name  = "Bellows AI"
-#   repos = ["factory", "other-owner/some-service"]
+#   id   = "bellows-ai"
+#   name = "Bellows AI"
 ```
 
+**There is no repo list to configure.** Install the GitHub App on the repositories you want measured,
+and that installation is both the credential and the list — so they cannot drift apart, which is
+what `ORG_REPOS` could not promise: a repo listed but never granted failed every sync with a 404
+that read as a deleted repository. Cost is still ~243 rate-limit points per repo for a full walk, so
+the sync TTL floor rises to 60s × the number of repositories the installation reports.
+
 A database whose name ends in `_test`, `_seed`, `_synthetic`, `_demo` or `_e2e` is treated as
-disposable, and is refused outright if a token is also set — `npm run seed` writes invented pull
+disposable, and is refused outright in `app` mode — `npm run seed` writes invented pull
 requests into one and `npm run test:db` truncates one, so real fetched history put there is either
 counterfeited or destroyed.
 
@@ -65,11 +72,12 @@ docker compose up
 docker build -f docker/Dockerfile --target runtime -t factory-ai .
 ```
 
-Compose reads the repo-root `.env` for `GITHUB_TOKEN` and the rest, and mounts a `workspaces`
-volume at `/workspaces`, which `ORG_WORKSPACE_ROOT` defaults to. So the stack also clones every repo
-in `ORG_REPOS` to `/workspaces/<ORG_ID>/<name>` on first boot — set `ORG_WORKSPACE_ROOT=` in `.env`
-if you would rather it did not. An existing checkout is never fetched or overwritten; see
-[docs/workspace.md](docs/workspace.md).
+Compose reads the repo-root `.env` for the App credentials and the rest, and mounts a `workspaces`
+volume at `/workspaces`, which `ORG_WORKSPACE_ROOT` defaults to. **Nothing is cloned at boot.** Each
+member signs in, picks repositories from the Workspace page, and gets their own checkouts at
+`/workspaces/<ORG_ID>/<user id>/<name>` — so one person's agent cannot edit another's working copy.
+Set `ORG_WORKSPACE_ROOT=` in `.env` to switch that off entirely. An existing checkout is never
+fetched or overwritten, and nothing is ever pruned; see [docs/workspace.md](docs/workspace.md).
 
 ## Auth
 
@@ -92,11 +100,12 @@ one scope this app ever requests. See [docs/auth.md](docs/auth.md).
 loopback bind is the access control — that is what `npm run seed` and `npm run verify:ui` need, and
 what a clone with no OAuth app can run.
 
-The GitHub credential is a single server-side PAT read from `GITHUB_TOKEN`, behind the
-`TokenProvider` interface in `server/src/github/token.ts` — a GitHub App installation token can
-replace it without touching any call site.
+There are two GitHub registrations, deliberately. An **OAuth App** signs people in and requests zero
+scopes — it reads a numeric id and a login, nothing else. A separate **GitHub App** reads
+repositories: its private key signs a short-lived JWT, which buys an installation token that expires
+in an hour. One credential doing both would mean every person who signs in grants repository access.
 
-Required fine-grained PAT permissions:
+Required GitHub App installation permissions:
 
 - `Metadata: read`
 - `Pull requests: read`

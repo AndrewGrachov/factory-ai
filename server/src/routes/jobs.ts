@@ -1,6 +1,7 @@
-import type { FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import { callerOf } from '../auth/plugin.js';
 import type { JobOutcome, JobStatus, JobStore } from '../db/job-store.js';
+import { UUID, bad, body, guard } from './helpers.js';
 
 /**
  * A command is a shell line, not a payload. 16 KiB is far past anything a human writes, and past
@@ -22,38 +23,10 @@ const LEASE_SECONDS_MAX = 3600;
 const LIST_LIMIT_DEFAULT = 50;
 const LIST_LIMIT_MAX = 200;
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /** Far past the `cse_` tokens seen in practice, and short enough that it cannot be an essay. */
 const REMOTE_SESSION_LIMIT = 256;
 
 const STATUSES: readonly JobStatus[] = ['queued', 'running', 'standby', 'succeeded', 'failed', 'dead'];
-
-const body = (raw: unknown): Record<string, unknown> =>
-    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-
-const bad = (reply: FastifyReply, code: string, error: string) => reply.code(400).send({ error, code });
-
-/**
- * Every store call funnels through here: a write failure is a 503, matching the ingest routes.
- *
- * The result is wrapped rather than nullable because `claim` and `get` both return null for a
- * perfectly good answer — no work waiting, no such job — and a bare null could not tell that from
- * a database that is down.
- */
-async function guard<T>(
-    reply: FastifyReply,
-    log: (e: Error) => void,
-    run: () => Promise<T>,
-): Promise<{ ok: true; value: T } | { ok: false }> {
-    try {
-        return { ok: true, value: await run() };
-    } catch (e) {
-        log(e as Error);
-        await reply.code(503).send({ error: (e as Error).message, code: 'UNAVAILABLE' });
-        return { ok: false };
-    }
-}
 
 function leaseSeconds(raw: unknown): number | null {
     if (raw === undefined || raw === null) return LEASE_SECONDS_DEFAULT;

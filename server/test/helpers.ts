@@ -6,9 +6,11 @@ import { SESSION_COOKIE, hashToken, mintToken, sign } from '../src/auth/session.
 import type { AuthStore, Caller, Role } from '../src/auth/store.js';
 import type { AppConfig, AuthConfig } from '../src/config.js';
 import type { PrStore, SyncState } from '../src/db/pr-store.js';
+import type { CloneStatus, UserRepo, UserRepoStore } from '../src/db/user-repo-store.js';
 import type { ForgeClient, PullRequestsResult } from '../src/forge.js';
 import { fixturePayload } from '../src/github/fixture-payload.js';
 import { GITHUB_CAPABILITIES, toCanonical } from '../src/github/map.js';
+import { staticRepoSource } from '../src/github/repo-source.js';
 import { createStatsService } from '../src/stats-service.js';
 import type { TelemetryClient, TelemetryHealth } from '../src/telemetry/client.js';
 
@@ -45,7 +47,10 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     return {
         orgId: 'test-org',
         orgName: 'Test Org',
-        repos: [{ owner: 'Bellows-AI', name: 'bellows.ai' }],
+        // `none`, so the offline suite never constructs a token provider or an App client. The repo
+        // list reaches the service through `staticRepoSource` in `harness` instead — which is the
+        // same seam `npm run seed` and `verify:ui` use, rather than a test-only one.
+        github: { mode: 'none' },
         baseBranch: 'dev',
         bots: ['claude', 'claude[bot]', 'github-actions', 'github-actions[bot]', 'bellows-frontend-fix-bot'],
         syncTtlMs: 60_000,
@@ -57,7 +62,6 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         // literal here because AppConfig requires one, not because anything opens it.
         databaseUrl: 'postgres://factory:factory@127.0.0.1:5432/factory_test',
         telemetryTtlMs: 30_000,
-        repoNames: [TEST_REPO],
         workspaceRoot: null,
         // Matches loadConfig's default. Note that this is only what the *config* says: the app is
         // built with no auth store at all unless a test passes one, so by default no hook runs.
@@ -186,6 +190,11 @@ export function memoryPrStore(seed: {
         recorded: [],
         broken: false,
 
+        async storedRepos() {
+            guard();
+            return [...new Set(prs.map((pr) => pr.repo))].sort();
+        },
+
         async loadPullRequests() {
             guard();
             // Same ordering the SQL imposes, and for the same reason: compute() reads
@@ -274,6 +283,142 @@ export function memoryPrStore(seed: {
     return store;
 }
 
+export interface MemoryUserRepoStore extends UserRepoStore {
+    /** Every row, deselected ones included, so a test can assert nothing was deleted. */
+    rows(): { userId: string; owner: string; name: string; status: CloneStatus; deselected: boolean }[];
+    /** Puts a row into `cloning` without a queue, to stand in for a process that then died. */
+    strand(userId: string, repo: { owner: string; name: string }): void;
+}
+
+/**
+ * An in-memory UserRepoStore, for the same reason memoryPrStore exists: it keeps the offline suite a
+ * no-database suite while still exercising the selection rules, the claim and the restart recovery.
+ * The SQL behind it is covered by server/test-db, which needs a container.
+ */
+export function memoryUserRepoStore(): MemoryUserRepoStore {
+    interface Row {
+        userId: string;
+        owner: string;
+        name: string;
+        status: CloneStatus;
+        error: string | null;
+        attempts: number;
+        selectedAt: string;
+        startedAt: string | null;
+        readyAt: string | null;
+        deselectedAt: string | null;
+    }
+    const rows: Row[] = [];
+    const at = () => new Date().toISOString();
+    const find = (userId: string, repo: { owner: string; name: string }) =>
+        rows.find((r) => r.userId === userId && r.owner === repo.owner && r.name === repo.name);
+    const view = (row: Row): UserRepo => ({
+        owner: row.owner,
+        name: row.name,
+        status: row.status,
+        error: row.error,
+        attempts: row.attempts,
+        selectedAt: row.selectedAt,
+        startedAt: row.startedAt,
+        readyAt: row.readyAt,
+    });
+
+    return {
+        rows: () =>
+            rows.map((r) => ({
+                userId: r.userId,
+                owner: r.owner,
+                name: r.name,
+                status: r.status,
+                deselected: r.deselectedAt !== null,
+            })),
+
+        strand(userId, repo) {
+            const row = find(userId, repo);
+            if (row) row.status = 'cloning';
+        },
+
+        async select(userId, repos) {
+            for (const repo of repos) {
+                const held = find(userId, repo);
+                if (held) {
+                    held.deselectedAt = null;
+                    held.selectedAt = at();
+                    // A checkout that is on disk is on disk, whatever a later request says.
+                    if (held.status !== 'ready') {
+                        held.status = 'queued';
+                        held.error = null;
+                    }
+                    continue;
+                }
+                rows.push({
+                    userId,
+                    owner: repo.owner,
+                    name: repo.name,
+                    status: 'queued',
+                    error: null,
+                    attempts: 0,
+                    selectedAt: at(),
+                    startedAt: null,
+                    readyAt: null,
+                    deselectedAt: null,
+                });
+            }
+            const keep = new Set(repos.map((r) => `${r.owner}/${r.name}`));
+            for (const row of rows) {
+                if (row.userId !== userId || row.deselectedAt !== null) continue;
+                if (!keep.has(`${row.owner}/${row.name}`)) row.deselectedAt = at();
+            }
+        },
+
+        async list(userId) {
+            return rows.filter((r) => r.userId === userId && r.deselectedAt === null).map(view);
+        },
+
+        async orphaned(userId) {
+            return rows.filter((r) => r.userId === userId && r.deselectedAt !== null).map(view);
+        },
+
+        async claimPending(limit) {
+            const claimed = rows
+                .filter((r) => r.status === 'queued' && r.deselectedAt === null)
+                .sort((a, b) => a.selectedAt.localeCompare(b.selectedAt))
+                .slice(0, Math.max(0, limit));
+            for (const row of claimed) {
+                row.status = 'cloning';
+                row.startedAt = at();
+                row.attempts += 1;
+                row.error = null;
+            }
+            return claimed.map((r) => ({ userId: r.userId, owner: r.owner, name: r.name }));
+        },
+
+        async markReady(userId, repo) {
+            const row = find(userId, repo);
+            if (!row) return;
+            row.status = 'ready';
+            row.readyAt = at();
+            row.error = null;
+        },
+
+        async markFailed(userId, repo, error) {
+            const row = find(userId, repo);
+            if (!row) return;
+            row.status = 'failed';
+            row.error = error;
+        },
+
+        async requeueStranded() {
+            const stranded = rows.filter((r) => r.status === 'cloning');
+            for (const row of stranded) {
+                row.status = 'queued';
+                row.error = null;
+            }
+            return stranded.length;
+        },
+    };
+}
+
 export interface MemoryAuthStore extends AuthStore {
     /**
      * Creates a claimed membership and returns the account, so a test can hold a session without
@@ -317,6 +462,13 @@ export function memoryAuthStore(): MemoryAuthStore {
     const workerTokens: { orgId: string; id: string; name: string; hash: string; revoked: boolean }[] = [];
     let nextId = 1;
 
+    /**
+     * A uuid, like app_user.id. Not cosmetic: that id becomes a workspace path segment and a docker
+     * WORKDIR, and both `workspaceDir()` and the driver refuse one that is not a uuid. A store that
+     * minted `user-1` would let those assertions pass here and fail against a real database.
+     */
+    const userId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
     const key = (hash: Buffer) => hash.toString('hex');
     const callerFor = (user: User, member: Member): Caller => ({
         user: { id: user.id, githubUserId: user.githubUserId, login: user.login, displayName: user.displayName },
@@ -331,7 +483,7 @@ export function memoryAuthStore(): MemoryAuthStore {
     const store: MemoryAuthStore = {
         seedMember(orgId, login, role = 'member') {
             const user: User = {
-                id: `user-${nextId}`,
+                id: userId(nextId),
                 githubUserId: nextId,
                 login: login.toLowerCase(),
                 displayName: login,
@@ -344,7 +496,7 @@ export function memoryAuthStore(): MemoryAuthStore {
         },
 
         seedLocalUser(orgId) {
-            const user: User = { id: 'user-local', githubUserId: 0, login: '__local__', displayName: 'Local' };
+            const user: User = { id: userId(0), githubUserId: 0, login: '__local__', displayName: 'Local' };
             users.push(user);
             const member: Member = {
                 orgId,
@@ -379,7 +531,7 @@ export function memoryAuthStore(): MemoryAuthStore {
                 user.displayName = identity.displayName;
             } else {
                 user = {
-                    id: `user-${nextId}`,
+                    id: userId(nextId),
                     githubUserId: identity.githubUserId,
                     login,
                     displayName: identity.displayName,
@@ -576,13 +728,19 @@ export async function harness(options: {
      */
     auth?: AuthStore;
     identity?: GitHubIdentityClient;
+    /** Which repos this org measures. Defaults to the one the fixture PRs are stamped with. */
+    repos?: readonly { owner: string; name: string }[];
+    /** Absent by default, which leaves the workspace routes unregistered. */
+    userRepos?: UserRepoStore;
 }) {
     const config = testConfig(options.config);
     const telemetry = options.telemetry ?? stubTelemetryClient();
+    const repos = staticRepoSource(options.repos ?? [{ owner: 'Bellows-AI', name: 'bellows.ai' }]);
     let clock = Date.parse('2026-08-21T12:00:00.000Z');
     const service = createStatsService({
         config,
         client: options.client,
+        repos,
         telemetry,
         store: options.store ?? memoryPrStore(),
         now: () => clock,
@@ -590,6 +748,8 @@ export async function harness(options: {
     const app = await buildApp({
         config,
         service,
+        repos,
+        userRepos: options.userRepos,
         auth: options.auth,
         identity: options.identity,
         now: () => clock,

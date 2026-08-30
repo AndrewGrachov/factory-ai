@@ -1,22 +1,9 @@
+/**
+ * Async because the implementation that ships is `installationTokenProvider`, which mints a token
+ * against GitHub and refreshes it every hour. It was async before that existed too, on the bet that
+ * it eventually would — which is why swapping a personal access token for a GitHub App touched no
+ * call site of this interface.
+ */
 export interface TokenProvider {
     get(): Promise<string>;
-}
-
-/**
- * Async from the start so a GitHub App installation-token provider — which has to mint
- * and refresh — drops in without touching any call site. Nothing else in the server
- * reads GITHUB_TOKEN.
- */
-export function envTokenProvider(env: NodeJS.ProcessEnv = process.env): TokenProvider {
-    return {
-        async get() {
-            const token = env.GITHUB_TOKEN;
-            if (!token) throw new Error('GITHUB_TOKEN is not set');
-            return token;
-        },
-    };
-}
-
-export function staticTokenProvider(token: string): TokenProvider {
-    return { get: async () => token };
 }

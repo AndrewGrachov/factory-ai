@@ -16,7 +16,7 @@
  */
 import { writeFileSync } from 'node:fs';
 
-const REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
+const REPO = 'Bellows-AI/bellows.ai';
 const sessions = [];
 const spans = [];
 const splits = [];
@@ -134,7 +134,7 @@ session('s08-detached', {
 // Case 8: another repo -> excluded from totals, counted in otherRepoSessions. Deliberately the
 // largest session in the file, so a broken filter shows up as an obviously inflated total.
 session('s09-other-repo', {
-    repo: 'Leeloo-AI-RGA-OS/other-service', from: '2026-07-12T09:00:00Z', to: '2026-07-12T10:00:00Z',
+    repo: 'Bellows-AI/other-service', from: '2026-07-12T09:00:00Z', to: '2026-07-12T10:00:00Z',
     tokens: T(90000, 15000, 500000, 40000), linesAdded: 900, linesRemoved: 300,
     editsAccepted: 40, editsRejected: 5, activeSeconds: 3600, commits: 6, pullRequests: 2,
     parts: [{ branch: 'feat/other-thing', from: '2026-07-12T09:00:00Z', to: '2026-07-12T10:00:00Z', share: 1 }],

@@ -44,7 +44,7 @@ describe('GET /api/stats', () => {
         const body = (await app.inject({ method: 'GET', url: '/api/stats' })).json();
         expect(body.stats.meta.counts.mergedToBase).toBe(178);
         expect(body.stats.threads.total).toBe(654);
-        expect(body.meta.repos).toEqual([{ owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' }]);
+        expect(body.meta.repos).toEqual([{ owner: 'Bellows-AI', name: 'bellows.ai' }]);
         expect(body.meta.organization).toEqual({
             mode: 'config',
             current: { id: 'test-org', name: 'Test Org' },

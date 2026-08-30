@@ -186,6 +186,46 @@ describe.skipIf(!enabled)('invite and claim', () => {
     });
 });
 
+describe.skipIf(!enabled)('auto-join', () => {
+    it('creates the missing membership instead of refusing', async () => {
+        const caller = await store.signIn(identity(20, 'stranger'), ORG, { autoJoin: true });
+
+        expect(caller?.user.login).toBe('stranger');
+        // `member`, never `admin`: being let in is not the same as being trusted to let others in.
+        expect(caller?.role).toBe('member');
+        expect(await store.listMembers(ORG)).toEqual([
+            { login: 'stranger', role: 'member', claimed: true },
+        ]);
+    });
+
+    it('does nothing when the account is already a member, keeping its role', async () => {
+        await store.invite(ORG, 'octocat', 'admin');
+
+        const caller = await store.signIn(identity(21, 'octocat'), ORG, { autoJoin: true });
+
+        expect(caller?.role).toBe('admin');
+        expect(await store.listMembers(ORG)).toHaveLength(1);
+    });
+
+    it('is idempotent, so a second sign-in does not collide with the row it created', async () => {
+        const first = await store.signIn(identity(22, 'stranger'), ORG, { autoJoin: true });
+        const second = await store.signIn(identity(22, 'stranger'), ORG, { autoJoin: true });
+
+        expect(second?.user.id).toBe(first?.user.id);
+        expect(await store.listMembers(ORG)).toHaveLength(1);
+    });
+
+    it('joins only the organization it was asked about', async () => {
+        await store.signIn(identity(23, 'stranger'), ORG, { autoJoin: true });
+        expect(await store.listMembers(OTHER_ORG)).toEqual([]);
+    });
+
+    it('still refuses without the flag, which is what keeps the decision in the callback', async () => {
+        expect(await store.signIn(identity(24, 'stranger'), ORG)).toBeNull();
+        expect(await store.listMembers(ORG)).toEqual([]);
+    });
+});
+
 describe.skipIf(!enabled)('sessions', () => {
     const live = () => new Date(Date.now() + 3600_000);
 

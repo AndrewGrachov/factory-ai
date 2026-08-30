@@ -120,6 +120,18 @@ describe('the rest of [auth]', () => {
         );
     });
 
+    it('leaves auto-join off unless an organization is named', () => {
+        const auth = (env: NodeJS.ProcessEnv = {}) =>
+            github(env).auth as { autoJoinGithubOrg: string | null };
+        // Off is invite-only membership, which is the state every existing deployment is in.
+        expect(auth().autoJoinGithubOrg).toBeNull();
+        expect(auth({ AUTH_AUTO_JOIN_GITHUB_ORG: '  ' }).autoJoinGithubOrg).toBeNull();
+        // NOT lowercased, unlike the bootstrap admin: this is a path segment sent to GitHub's API,
+        // which is case-insensitive about it, and the value is echoed back in the log and the
+        // consent screen where the operator's own spelling is what they will recognise.
+        expect(auth({ AUTH_AUTO_JOIN_GITHUB_ORG: 'Bellows-AI' }).autoJoinGithubOrg).toBe('Bellows-AI');
+    });
+
     it('carries the ingest token in both modes', () => {
         expect(load({ INGEST_TOKEN: 'secret' }).auth.ingestToken).toBe('secret');
         expect(github({ INGEST_TOKEN: 'secret' }).auth.ingestToken).toBe('secret');

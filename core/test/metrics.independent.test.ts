@@ -13,7 +13,7 @@ const BOTS = new Set([
     'claude[bot]',
     'github-actions',
     'github-actions[bot]',
-    'leeloo-frontend-fix-bot',
+    'bellows-frontend-fix-bot',
 ]);
 
 const raw = samplePayload();

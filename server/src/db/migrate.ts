@@ -93,7 +93,7 @@ const ORG_OWNED = [
  * Claims every row 005 parked in the reserved namespace for the configured organization.
  *
  * This is the other half of the migration, and it cannot live in the .sql file because that file
- * cannot see the config. Without it a deployment that sets ORG_ID=leeloo reads an empty partition:
+ * cannot see the config. Without it a deployment that sets ORG_ID=bellows reads an empty partition:
  * 200 OK, zero PRs, no log line, indistinguishable from data loss.
  *
  * Runs on every boot, and is a no-op after the first: nothing writes '__unclaimed__' once the

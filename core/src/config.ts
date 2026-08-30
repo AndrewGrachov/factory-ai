@@ -5,10 +5,10 @@ export const DEFAULT_BOTS = [
     'claude[bot]',
     'github-actions',
     'github-actions[bot]',
-    'leeloo-frontend-fix-bot',
+    'bellows-frontend-fix-bot',
 ];
 
-export const AI_LABELS = new Set(['leeloo-frontend-fix', 'leeloo-backend-fix']);
+export const AI_LABELS = new Set(['bellows-frontend-fix', 'bellows-backend-fix']);
 
 /**
  * Every capability present. The default for `derive`, so a caller that has not yet grown a

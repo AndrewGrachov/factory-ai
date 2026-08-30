@@ -6,6 +6,23 @@ COPY server/package.json server/
 COPY web/package.json web/
 RUN npm ci --ignore-scripts
 
+# The target docker-compose.yml builds, and the reason it names one: `runtime` below is the last
+# stage and so the default, and it is what deploys, but compose runs the working tree instead.
+#
+# This stage copies no sources at all: the repo arrives as a bind
+# mount and the container runs the same `npm run dev` as the host. FROM deps rather than a bare
+# node:24-alpine so that /app/node_modules already exists in the image — docker seeds a fresh named
+# volume from whatever the image has at the mount point, so the first `up` starts with the
+# dependencies already installed instead of a cold several-minute npm install.
+FROM deps AS dev
+WORKDIR /app
+# Same reason as the runtime stage: the workspace reconcile shells out to git.
+RUN apk add --no-cache git
+# The runtime stage sets this too. Without it the dev server binds 127.0.0.1 *inside* the container,
+# where the published port cannot reach it and curl from the host just hangs.
+ENV HOST=0.0.0.0
+EXPOSE 8080 5173
+
 FROM deps AS build
 WORKDIR /app
 COPY tsconfig.base.json tsconfig.json ./

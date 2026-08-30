@@ -40,6 +40,7 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     'auth.cookie_secure': { env: 'COOKIE_SECURE', kind: 'bool' },
     'auth.public_url': { env: 'PUBLIC_URL', kind: 'string' },
     'auth.bootstrap_admin': { env: 'AUTH_BOOTSTRAP_ADMIN', kind: 'string' },
+    'auth.auto_join_github_org': { env: 'AUTH_AUTO_JOIN_GITHUB_ORG', kind: 'string' },
     'auth.ingest_token': { env: 'INGEST_TOKEN', kind: 'string' },
 };
 

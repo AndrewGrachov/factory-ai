@@ -54,6 +54,20 @@ export type AuthConfig =
           readonly publicUrl: string;
           /** A GitHub login made an admin at boot iff the organization has no members at all. */
           readonly bootstrapAdmin: string | null;
+          /**
+           * A GitHub organization whose members admit themselves on first sign-in, as ordinary
+           * members. Null keeps invite-only membership, where an admin names every login in advance.
+           *
+           * The boundary moves to GitHub, which is the point: onboarding becomes "add them to the
+           * org" rather than a second, parallel roster that has to be kept in step by hand. It is
+           * not a *restriction* on invited members — an invite still admits somebody outside the
+           * org, which is what keeps `bootstrapAdmin` and outside collaborators working.
+           *
+           * Costs the zero-scopes property: `read:org` is requested when this is set, so GitHub's
+           * consent screen changes and the exchange makes one extra API call. That is the trade for
+           * not maintaining the roster twice.
+           */
+          readonly autoJoinGithubOrg: string | null;
           readonly ingestToken: string | null;
           /** Overridable so the browser check can drive a stub. Environment only — see loadAuth. */
           readonly authorizeUrl: string;
@@ -149,7 +163,7 @@ const DEFAULT_ORG_ID = 'default';
 /**
  * The id lands in a database primary key and in a `?org=` query parameter, so the character set is
  * closed here rather than checked at each edge. Lowercase only, because a case-insensitive
- * collision in a key is invisible: `Leeloo` and `leeloo` are two partitions that read as one. No
+ * collision in a key is invisible: `Bellows` and `bellows` are two partitions that read as one. No
  * dots, so the id stays usable as a bare path segment later. 39 characters is GitHub's login bound
  * — a familiar cap that keeps the key short.
  */
@@ -343,6 +357,7 @@ function loadAuth(env: NodeJS.ProcessEnv, host: string, port: number): AuthConfi
         cookieSecure: bool(env.COOKIE_SECURE, false, 'COOKIE_SECURE'),
         publicUrl: origin.origin,
         bootstrapAdmin: env.AUTH_BOOTSTRAP_ADMIN?.trim().toLowerCase() || null,
+        autoJoinGithubOrg: env.AUTH_AUTO_JOIN_GITHUB_ORG?.trim() || null,
         ingestToken,
         // Environment only, and deliberately absent from config-file.ts's KEYS. A configurable
         // authorize URL in a file that ships with a deployment is a phishing vector; as an
@@ -365,7 +380,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         );
     }
 
-    const owner = env.GITHUB_OWNER ?? 'Leeloo-AI-RGA-OS';
+    const owner = env.GITHUB_OWNER ?? 'Bellows-AI';
 
     // GITHUB_REPOS held this list until the organization took ownership of it. Fatal rather than
     // ignored — the one deliberate exception to "an unknown environment variable is ignored", and
@@ -386,7 +401,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         );
     }
     // Falls back to the GitHub owner, not to the id: a deployment that sets nothing shows
-    // "Leeloo-AI-RGA-OS" in the selector rather than the word "default", which reads as a bug.
+    // "Bellows-AI" in the selector rather than the word "default", which reads as a bug.
     // Empty is unset, because an empty name renders an invisible control.
     const orgName = env.ORG_NAME?.trim() || owner;
 
@@ -394,7 +409,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         ? env.ORG_REPOS.split(',')
               .map((entry) => entry.trim())
               .filter(Boolean)
-        : ['leeloo.ai'];
+        : ['bellows.ai'];
     if (!names.length) throw new Error('ORG_REPOS lists no repositories');
     // A bare name takes GITHUB_OWNER; a qualified "other-owner/name" keeps its own. So the
     // organization's repo list is not confined to one GitHub owner — a Factory organization is not

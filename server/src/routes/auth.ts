@@ -97,6 +97,15 @@ export const authRoutes =
                 const accessToken = await identity.exchange(query.code);
                 const who = await identity.identity(accessToken);
                 caller = await store.signIn(who, config.orgId);
+                // Only asked when an invite did not already admit them, so the ordinary member pays
+                // nothing for it, and only ever after GitHub has confirmed the organization — the
+                // store is told to create the membership, it never decides to.
+                if (!caller && auth.autoJoinGithubOrg) {
+                    const membership = await identity.orgMembership(accessToken, auth.autoJoinGithubOrg);
+                    if (membership === 'active') {
+                        caller = await store.signIn(who, config.orgId, { autoJoin: true });
+                    }
+                }
             } catch (e) {
                 request.log.error({ err: e }, 'github sign-in failed');
                 return reply.redirect(failure(returnTo, 'github'), 302);

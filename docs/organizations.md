@@ -22,7 +22,7 @@ it has not been built.
   not an obstacle to work around.
 - **The id is rejected, never normalised** (`^[a-z0-9][a-z0-9_-]{0,38}$`, no leading `__`). It is
   simultaneously a database key and a URL parameter, and a case-insensitive collision in a key is
-  invisible: `Leeloo` and `leeloo` are two partitions that read as one. Silently lowercasing would
+  invisible: `Bellows` and `bellows` are two partitions that read as one. Silently lowercasing would
   leave the file, the database and the query string disagreeing.
 - **`GITHUB_REPOS` and `github.repos` are fatal, not ignored.** The one deliberate exception to "an
   unknown environment variable is ignored", and for exactly the reason that rule is stated: a
@@ -50,7 +50,7 @@ it has not been built.
   week. Guarded by "still reports a hook-less session, which belongs to no organization".
 - **Pre-organization rows are backfilled `'__unclaimed__'` and adopted once, at boot.**
   `005_organizations.sql` cannot see the config, and backfilling the configured id directly would
-  point a deployment that sets `ORG_ID=leeloo` at an empty partition: **200 OK, zero PRs, no log
+  point a deployment that sets `ORG_ID=bellows` at an empty partition: **200 OK, zero PRs, no log
   line**. `adoptOrg()` in `db/migrate.ts` claims them, which is why `migrate()` takes a required
   `orgId` and why `config.ts` refuses any id beginning with `__`.
 - **The four child FKs are `on update cascade`, and `ORG_OWNED` deliberately omits those tables.**

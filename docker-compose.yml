@@ -1,11 +1,32 @@
 services:
+    # The dashboard, running the SAME `npm run dev` you would run on the host — tsx watch for the
+    # API, Vite with HMR for the SPA — against the working tree bind-mounted in. This file is an
+    # infrastructure wrapper, not a shipping vehicle: an edit is live without a rebuild, and there is
+    # nothing to rebuild anyway because the image carries no source.
+    #
+    # It used to build and serve `docker/Dockerfile`'s baked `runtime` stage, which meant every edit
+    # needed a `--build` — a full npm ci plus a four-package tsc — and an `up` without one silently
+    # served the previous build. That stage still exists and is still what deploys; it is just not
+    # what compose runs:
+    #
+    #   docker build -f docker/Dockerfile --target runtime -t factory-ai .
     dashboard:
         build:
             context: .
             dockerfile: docker/Dockerfile
+            # NOT the default (last) stage, which is `runtime`. See docker/Dockerfile.
+            target: dev
+        # `npm install` first because /app/node_modules is a named volume seeded from the image, so
+        # it is only as fresh as the last image build — this reconciles it with the working tree's
+        # lockfile, and costs a few seconds once warm.
+        command: sh -c 'npm install && npm run dev'
         # There is no application-level auth, so the localhost bind is the access control.
         ports:
             - '127.0.0.1:8080:8080'
+            # Vite. `/api` is proxied from here to the API in the same container, so either port is
+            # a working dashboard; this one hot-reloads the SPA and 8080 does not serve it at all in
+            # this mode (WEB_ROOT is unset without a build).
+            - '127.0.0.1:5173:5173'
         # Every ${VAR} below is substituted from the repo-root .env, which compose reads on its own
         # — that is where GITHUB_TOKEN comes from, and .env is gitignored and dockerignored so it
         # never enters an image layer.
@@ -15,12 +36,17 @@ services:
         # pointing at 127.0.0.1 — a different database from the one this file provisions) and would
         # bypass the empty-defaulting below. The list here is the container's contract; .env only
         # fills it in.
+        #
+        # The bind mount below does put .env inside the container, and `npm run dev -w server` hands
+        # it to node --env-file-if-exists. That does not undo the paragraph above: node lets a real
+        # environment variable win over the file, and every variable that matters is set here — so
+        # the host's DATABASE_URL, pointing at a different database, cannot take hold.
         environment:
             # Optional. Without it the dashboard never fetches and simply serves whatever is
             # already in the database — which is a supported way to run, not a broken one. With a
             # workspace attached it is also what clones private repos.
             GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-            GITHUB_OWNER: ${GITHUB_OWNER:-Leeloo-AI-RGA-OS}
+            GITHUB_OWNER: ${GITHUB_OWNER:-Bellows-AI}
             # Empty-defaulted, unlike most of this block, so a mounted factory.toml's
             # [organization] still wins: an empty variable is not an override. A literal default
             # here would clobber the file's organization.id on every start, and that id leads every
@@ -49,46 +75,68 @@ services:
             # the container at it would silently split history across two.
             DATABASE_URL: postgres://factory:factory@timescale:5432/factory_dev
             FACTORY_CONFIG: ${FACTORY_CONFIG:-}
-            # Empty-defaulted, like the ORG_* three and for the same reason: a mounted
-            # factory.toml's [auth] must win, and AUTH_MODE in particular decides whether the port
-            # is open. See docs/auth.md.
-            AUTH_MODE: ${AUTH_MODE:-}
+            # A literal, and the one place in this file where a mounted factory.toml is deliberately
+            # NOT allowed to win. `none` is still a supported mode and still the default everywhere
+            # else — `npm run seed`, `verify:ui` and `scripts/test-jobs.sh` need it, and a clone with
+            # no OAuth app has no way to obtain one — but this stack keeps its checkouts and runs
+            # POST /api/jobs, so it identifies its callers. A mode that could be turned off by
+            # editing a config file is not a wall. Flip this line to open the port; nothing else
+            # will do it for you. See docs/auth.md.
+            AUTH_MODE: github
             GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
             GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
             SESSION_SECRET: ${SESSION_SECRET:-}
             PUBLIC_URL: ${PUBLIC_URL:-}
             COOKIE_SECURE: ${COOKIE_SECURE:-}
             AUTH_BOOTSTRAP_ADMIN: ${AUTH_BOOTSTRAP_ADMIN:-}
+            # Members of this GitHub organization admit themselves on first sign-in. Empty keeps
+            # invite-only membership, where an admin names every login in advance.
+            AUTH_AUTO_JOIN_GITHUB_ORG: ${AUTH_AUTO_JOIN_GITHUB_ORG:-}
             INGEST_TOKEN: ${INGEST_TOKEN:-}
-            # A literal, and REQUIRED here rather than optional. The Dockerfile sets HOST=0.0.0.0,
-            # so with AUTH_MODE unset (the default, meaning no auth at all) loadConfig would refuse
-            # to boot: an open deployment on an address reachable from off the machine is a
-            # combination it makes inexpressible rather than merely warns about. Inside a container
-            # 0.0.0.0 is normal and the isolation is the `127.0.0.1:8080:8080` publish above —
-            # something loadConfig cannot see and must not guess at. This line is that assertion.
-            # If you publish this port on a routable address, set AUTH_MODE=github.
-            AUTH_ALLOW_PUBLIC_BIND: '1'
+            # No AUTH_ALLOW_PUBLIC_BIND. It used to be required here: the Dockerfile sets
+            # HOST=0.0.0.0, and loadConfig refuses `none` on a non-loopback host, so an open stack
+            # needed the hatch to boot at all. With AUTH_MODE pinned to github above there is
+            # nothing to except — put it back if you ever flip that line.
+            # Vite only, and only ever set here: on the host its absence leaves Vite bound to
+            # loopback, which is the access control there. Inside the container a loopback bind is
+            # unreachable from the published port and `curl :5173` simply hangs.
+            VITE_DEV_HOST: '0.0.0.0'
         volumes:
-            # The checkouts ORG_WORKSPACE_ROOT points at. Mounted unconditionally, unlike the
-            # factory.toml below: a named volume is created on demand, so there is no missing
-            # source to fail on, and without it every clone would be lost on the next `up`.
+            # The working tree, live. This is the whole point of the file. A factory.toml comes in
+            # with it and needs no mount of its own — note that most variables above are *real*
+            # values, not absent ones, so they still win over the file; env-first stays the
+            # contract. The ORG_* three are the exception, deliberately: see the comment on them.
+            - .:/app
+            # node_modules must NOT come from the host: the host tree holds darwin binaries (esbuild
+            # and rollup among them) that cannot execute in a Linux container. These named volumes
+            # shadow the bind mount at each workspace's node_modules, so the container keeps its own
+            # linux-native install — and keeps it across `down`, which is what makes a restart take
+            # about ten seconds instead of several minutes. They are seeded from the image, where
+            # the deps stage already ran npm ci, so even the first `up` starts warm.
             #
-            # A named volume rather than a bind mount because the container runs as `node`, which
-            # cannot usually write a host directory owned by someone else — and a clone that dies
-            # on permissions is a confusing first symptom. Reach the trees with
+            # core/dist is deliberately NOT one of these, tempting as it looks. tsc writes
+            # core/tsconfig.tsbuildinfo *beside* dist rather than inside it, so that file always
+            # comes from the bind mount: shadowing dist alone leaves tsc reading a buildinfo that
+            # says the output is current while the directory it names is empty, and it emits
+            # nothing. The server then dies on "Cannot find module @factory-ai/core/dist/index.js",
+            # which reads as a broken image rather than as a mount. Sharing both keeps the pair
+            # consistent, and the emitted JS is platform-independent, so either side can build it.
+            - node-modules:/app/node_modules
+            - core-node-modules:/app/core/node_modules
+            - server-node-modules:/app/server/node_modules
+            - web-node-modules:/app/web/node_modules
+            - driver-node-modules:/app/driver/node_modules
+            # The checkouts ORG_WORKSPACE_ROOT points at. A named volume rather than part of the
+            # bind mount above: these are clones of other people's repositories, and they have no
+            # business landing in this working tree. Reach them with
             # `docker compose exec dashboard sh` or `docker cp`.
             - workspaces:/workspaces
-            # A factory.toml has to be mounted in, since it is gitignored and dockerignored and so
-            # never enters the image. Left commented because compose errors out when a bind mount's
-            # source is missing, which would break `docker compose up` for anyone without the file.
-            # Note that most variables above are *real* values, not absent ones, so they win over
-            # the file — env-first stays the container's contract. The ORG_* three are the
-            # exception, and deliberately so: see the comment on them.
-            # - ./factory.toml:/app/factory.toml:ro
         depends_on:
             timescale:
                 condition: service_healthy
-        restart: unless-stopped
+        # Not `unless-stopped`. A dev process that exits on a syntax error should stay exited and
+        # show you the error, not loop.
+        restart: 'no'
         healthcheck:
             # alpine has no curl, so probe with node's global fetch.
             test:
@@ -101,7 +149,9 @@ services:
             interval: 30s
             timeout: 5s
             retries: 3
-            start_period: 10s
+            # Generous because a cold `up` installs dependencies and builds core before the port
+            # answers. 10s would mark that unhealthy and hold up everything with a depends_on.
+            start_period: 180s
 
     # Claims jobs from the board and spawns a claude-executor per job.
     #
@@ -199,3 +249,10 @@ volumes:
     # The organization's checkouts. Survives `docker compose down`; `down -v` discards them, and
     # they are re-cloned on the next boot.
     workspaces:
+    # The container's linux-native dependency install, one per workspace. `down -v` discards these
+    # too, which is the way to force a clean reinstall — and makes the next `up` slow, once.
+    node-modules:
+    core-node-modules:
+    server-node-modules:
+    web-node-modules:
+    driver-node-modules:

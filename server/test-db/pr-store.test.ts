@@ -29,8 +29,8 @@ let store: PrStore;
 /** A second store on the same pool, bound to a different org. Only the org guard uses it. */
 let otherOrgStore: PrStore;
 
-const REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
-const OTHER = 'Leeloo-AI-RGA-OS/leeloo-infra';
+const REPO = 'Bellows-AI/bellows.ai';
+const OTHER = 'Bellows-AI/bellows-infra';
 const ORG = 'test-org';
 const OTHER_ORG = 'other-org';
 
@@ -102,7 +102,7 @@ function pr(over: Partial<CanonicalPr> = {}): CanonicalPr {
                 parentReviewKey: 'rev-1',
             },
         ],
-        labels: ['leeloo-frontend-fix'],
+        labels: ['bellows-frontend-fix'],
         truncated: [],
         ...over,
     };

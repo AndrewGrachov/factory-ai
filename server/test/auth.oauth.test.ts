@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { createGitHubIdentityClient } from '../src/auth/github.js';
 import { OAUTH_COOKIE, SESSION_COOKIE } from '../src/auth/session.js';
+import type { AuthConfig } from '../src/config.js';
 import type { MemoryAuthStore } from './helpers.js';
 import { githubAuth, harness, memoryAuthStore, stubIdentityClient, stubClient } from './helpers.js';
 
@@ -123,6 +125,100 @@ describe('github sign-in', () => {
         const response = await callback(app, 'error=access_denied', state);
         expect(response.statusCode).toBe(302);
         expect(response.headers['content-type'] ?? '').not.toContain('application/json');
+    });
+});
+
+describe('auto-join from a GitHub organization', () => {
+    const AUTO_JOIN_ORG = 'Bellows-AI';
+
+    async function autoJoinSetup(seed: (store: MemoryAuthStore) => void = () => {}) {
+        const auth = memoryAuthStore();
+        seed(auth);
+        const identity = stubIdentityClient();
+        const { app } = await harness({
+            client: stubClient(),
+            config: { auth: githubAuth({ autoJoinGithubOrg: AUTO_JOIN_ORG }) },
+            auth,
+            identity,
+        });
+        return { app, auth, identity };
+    }
+
+    it('admits an uninvited member of the organization, as a member and not an admin', async () => {
+        const { app, auth, identity } = await autoJoinSetup();
+        identity.orgState = 'active';
+        const state = await begin(app);
+
+        const response = await callback(app, `code=abc&state=${encodeURIComponent(state)}`, state);
+
+        expect(response.headers.location).toBe('/');
+        expect(auth.sessions()).toHaveLength(1);
+        expect(identity.orgLookups).toEqual([AUTO_JOIN_ORG]);
+        // `member`, never `admin`: admitting somebody is not the same as trusting them to invite.
+        expect(await auth.listMembers(ORG)).toEqual([{ login: 'octocat', role: 'member', claimed: true }]);
+    });
+
+    it('refuses somebody outside the organization', async () => {
+        const { app, auth, identity } = await autoJoinSetup();
+        identity.orgState = 'none';
+        const state = await begin(app);
+
+        const response = await callback(app, `code=abc&state=${encodeURIComponent(state)}`, state);
+
+        expect(errorOf(response.headers.location as string)).toBe('no_membership');
+        expect(auth.sessions()).toEqual([]);
+        expect(await auth.listMembers(ORG)).toEqual([]);
+    });
+
+    it('refuses an unaccepted GitHub invitation, which is an offer and not a membership', async () => {
+        // Otherwise an org admin could add a login to Factory without that person ever agreeing.
+        const { app, auth, identity } = await autoJoinSetup();
+        identity.orgState = 'pending';
+        const state = await begin(app);
+
+        const response = await callback(app, `code=abc&state=${encodeURIComponent(state)}`, state);
+
+        expect(errorOf(response.headers.location as string)).toBe('no_membership');
+        expect(auth.sessions()).toEqual([]);
+    });
+
+    it('keeps the role an invite already granted, instead of demoting to member', async () => {
+        const { app, auth, identity } = await autoJoinSetup((store) => {
+            void store.invite(ORG, 'octocat', 'admin');
+        });
+        identity.orgState = 'active';
+        const state = await begin(app);
+
+        const response = await callback(app, `code=abc&state=${encodeURIComponent(state)}`, state);
+
+        expect(response.headers.location).toBe('/');
+        expect(await auth.listMembers(ORG)).toEqual([{ login: 'octocat', role: 'admin', claimed: true }]);
+        // The invite settled it, so GitHub was never asked — the ordinary member pays nothing for
+        // a feature that only matters to somebody arriving without a row.
+        expect(identity.orgLookups).toEqual([]);
+    });
+
+    it('asks GitHub for nothing when auto-join is off', async () => {
+        const { app, identity } = await setup();
+        identity.orgState = 'active';
+        const state = await begin(app);
+
+        const response = await callback(app, `code=abc&state=${encodeURIComponent(state)}`, state);
+
+        expect(errorOf(response.headers.location as string)).toBe('no_membership');
+        expect(identity.orgLookups).toEqual([]);
+    });
+
+    it('requests read:org only when auto-join is configured', async () => {
+        // An unscoped token reports every organization absent, so the scope is what makes the check
+        // answerable at all — and asking for it when nothing reads it is a scope nobody needs.
+        const base = githubAuth() as Extract<AuthConfig, { mode: 'github' }>;
+
+        const off = createGitHubIdentityClient(base);
+        expect(new URL(off.authorizeUrl('s')).searchParams.get('scope')).toBeNull();
+
+        const on = createGitHubIdentityClient({ ...base, autoJoinGithubOrg: AUTO_JOIN_ORG });
+        expect(new URL(on.authorizeUrl('s')).searchParams.get('scope')).toBe('read:org');
     });
 });
 

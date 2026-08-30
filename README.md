@@ -3,7 +3,7 @@
 Software Engineering factory control plane.
 
 First surface: **Factory Stats** — a dashboard measuring the efficiency of an AI-heavy delivery
-process for `Leeloo-AI-RGA-OS/leeloo.ai`: throughput, cycle time, rework, and whether automated
+process for `Bellows-AI/factory`: throughput, cycle time, rework, and whether automated
 code review produces actionable signal.
 
 Metric definitions, the API traps behind them, and the reasoning are specified in
@@ -43,9 +43,9 @@ npm run dev
 # The organization owns the repo list, and every repo it lists is reported combined on one page.
 # Cost is ~243 rate-limit points per repo, so the sync TTL floor rises to 60s x the repo count.
 #   [organization]
-#   id    = "leeloo"
-#   name  = "Leeloo AI"
-#   repos = ["leeloo.ai", "leeloo-infra"]
+#   id    = "bellows-ai"
+#   name  = "Bellows AI"
+#   repos = ["factory", "other-owner/some-service"]
 ```
 
 A database whose name ends in `_test`, `_seed`, `_synthetic`, `_demo` or `_e2e` is treated as
@@ -56,7 +56,13 @@ counterfeited or destroyed.
 `npm run dev` starts the API on `127.0.0.1:8080` and Vite on `5173` with `/api` proxied.
 
 ```bash
-docker compose up --build     # serves the built SPA and the API on 127.0.0.1:8080
+# Runs `npm run dev` inside the container against the bind-mounted working tree: API on
+# 127.0.0.1:8080, Vite on 5173, edits live with no rebuild. node_modules lives in a named volume,
+# so a restart takes seconds; `down -v` forces a clean reinstall.
+docker compose up
+
+# What deploys. Compose does not run this.
+docker build -f docker/Dockerfile --target runtime -t factory-ai .
 ```
 
 Compose reads the repo-root `.env` for `GITHUB_TOKEN` and the rest, and mounts a `workspaces`
@@ -67,8 +73,24 @@ if you would rather it did not. An existing checkout is never fetched or overwri
 
 ## Auth
 
-There is none. The dashboard has no login, and the localhost bind in `docker-compose.yml` is the
-access control. Do not expose the port without putting authentication in front of it first.
+**`docker compose up` requires a GitHub sign-in.** `docker-compose.yml` pins `AUTH_MODE=github`,
+and unlike almost everything else in that file a mounted `factory.toml` cannot override it. Fill in
+`GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `SESSION_SECRET` (32+ chars), `PUBLIC_URL`
+and `AUTH_BOOTSTRAP_ADMIN` in `.env` — a missing one is fatal at boot and names itself, rather than
+falling back to an open port. Register an **OAuth App**, not a GitHub App, with the callback at
+`<PUBLIC_URL>/api/auth/github/callback`; on the default compose ports that is
+`http://127.0.0.1:5173/api/auth/github/callback`.
+
+Membership is Factory's, not GitHub's. Set `AUTH_AUTO_JOIN_GITHUB_ORG` to a GitHub organization and
+its members admit themselves, as ordinary members, the first time they sign in — onboarding is "add
+them to the org". Leave it empty for invite-only, where an admin names every login in advance with
+`npm run invite`; either way an invite still admits somebody outside the org, and
+`AUTH_BOOTSTRAP_ADMIN` covers the first admin. Auto-join asks GitHub for `read:org`, which is the
+one scope this app ever requests. See [docs/auth.md](docs/auth.md).
+
+`npm run dev` on the host still defaults to `AUTH_MODE=none`, where every route is open and the
+loopback bind is the access control — that is what `npm run seed` and `npm run verify:ui` need, and
+what a clone with no OAuth app can run.
 
 The GitHub credential is a single server-side PAT read from `GITHUB_TOKEN`, behind the
 `TokenProvider` interface in `server/src/github/token.ts` — a GitHub App installation token can

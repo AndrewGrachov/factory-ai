@@ -47,7 +47,7 @@ describe('toCanonical, recomputed off the raw GitHub capture', () => {
             'claude[bot]',
             'github-actions',
             'github-actions[bot]',
-            'leeloo-frontend-fix-bot',
+            'bellows-frontend-fix-bot',
         ]);
         const threads = mergedRaw.flatMap((pr) => pr.reviewThreads.nodes);
         const bot = threads.filter((t) => bots.has(t.comments.nodes[0]?.author?.login ?? 'ghost')).length;

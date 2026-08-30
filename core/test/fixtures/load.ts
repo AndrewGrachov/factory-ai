@@ -50,7 +50,7 @@ export function joinKeys(): PrTelemetryKey[] {
     }));
 }
 
-export const FIXTURE_REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
+export const FIXTURE_REPO = 'Bellows-AI/bellows.ai';
 
 /** The window the fixture was captured in, so `partial` week flags stay stable. */
 export const FIXTURE_NOW = new Date('2026-08-21T12:00:00.000Z');

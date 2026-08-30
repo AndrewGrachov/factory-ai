@@ -1,7 +1,7 @@
 [
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 1,
     "title": "Added Pipelines",
     "state": "merged",
@@ -41,7 +41,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 2,
     "title": "fix: prevent Sentry 429 error cascade and toast flooding (LEEL-10868)",
     "state": "closed",
@@ -56,7 +56,7 @@
     "deletions": 10,
     "changedFiles": 4,
     "author": {
-      "login": "LEELAIRGAOS"
+      "login": "BELLOWSAI"
     },
     "commitCount": 1,
     "reviewCount": 0,
@@ -77,7 +77,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 3,
     "title": "fix: prevent false positive 'already activated' error on Instagram connection (LEEL-10871)",
     "state": "closed",
@@ -92,7 +92,7 @@
     "deletions": 8,
     "changedFiles": 2,
     "author": {
-      "login": "LEELAIRGAOS"
+      "login": "BELLOWSAI"
     },
     "commitCount": 1,
     "reviewCount": 1,
@@ -144,7 +144,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 4,
     "title": "Pipelines",
     "state": "merged",
@@ -212,7 +212,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 5,
     "title": "Hotfix 0.79.3",
     "state": "merged",
@@ -368,7 +368,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 6,
     "title": "LEEL-10008 - Added another messengers indicators and issue checker",
     "state": "merged",
@@ -404,7 +404,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 7,
     "title": "LEEL-10674 [fix] deals filter",
     "state": "merged",
@@ -440,7 +440,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 8,
     "title": "LEEL-10790 - Removed duplicate",
     "state": "merged",
@@ -476,7 +476,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 9,
     "title": "Hotfix 0.79.4",
     "state": "merged",
@@ -524,7 +524,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 10,
     "title": "Hotfix 0.79.5",
     "state": "merged",
@@ -572,7 +572,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 11,
     "title": "Hotfix 0.79.6",
     "state": "merged",
@@ -616,7 +616,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 12,
     "title": "Action block in CRM",
     "state": "closed",
@@ -660,7 +660,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 13,
     "title": "Action block in CRM",
     "state": "merged",
@@ -704,7 +704,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 14,
     "title": "LEEL-10886 - Manual subscription to LGT",
     "state": "merged",
@@ -744,7 +744,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 15,
     "title": "Update SKILL.md",
     "state": "merged",
@@ -780,7 +780,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 16,
     "title": "docs: add Sales and Orders page documentation",
     "state": "open",
@@ -816,7 +816,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 17,
     "title": "LEEL-10702 - FB analytics fixes",
     "state": "merged",
@@ -862,7 +862,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 19,
     "title": "docs: add REVIEW.md for Claude Code Review Agent",
     "state": "merged",
@@ -877,7 +877,7 @@
     "deletions": 0,
     "changedFiles": 1,
     "author": {
-      "login": "LEELAIRGAOS"
+      "login": "BELLOWSAI"
     },
     "commitCount": 3,
     "reviewCount": 14,
@@ -1174,7 +1174,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 20,
     "title": "Hotfix 0.79.7",
     "state": "merged",
@@ -1242,7 +1242,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 21,
     "title": "docs: add ARCHITECTURE.md component index and domain cross-walk",
     "state": "merged",
@@ -1257,7 +1257,7 @@
     "deletions": 0,
     "changedFiles": 3,
     "author": {
-      "login": "LEELAIRGAOS"
+      "login": "BELLOWSAI"
     },
     "commitCount": 5,
     "reviewCount": 9,
@@ -1457,7 +1457,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 22,
     "title": "Delete SKILL.md",
     "state": "merged",
@@ -1493,7 +1493,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 23,
     "title": "LEEL-10814 — Изменение порядка кастомных полей",
     "state": "merged",
@@ -1850,7 +1850,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 24,
     "title": "Revert \"docs: add ARCHITECTURE.md component index and domain cross-walk\"",
     "state": "merged",
@@ -1886,7 +1886,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 25,
     "title": "Revert \"Revert \"docs: add ARCHITECTURE.md component index and domain cross-walk\"\"",
     "state": "merged",
@@ -1930,7 +1930,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 26,
     "title": "update pr skill",
     "state": "merged",
@@ -2063,7 +2063,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 27,
     "title": "update pr skill: apply bot review fixes",
     "state": "merged",
@@ -2120,7 +2120,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 28,
     "title": "Add tests on PR",
     "state": "merged",
@@ -2414,7 +2414,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 29,
     "title": "docs: add TDD methodology and test balance guidelines to CLAUDE.md",
     "state": "merged",
@@ -2429,7 +2429,7 @@
     "deletions": 0,
     "changedFiles": 1,
     "author": {
-      "login": "LEELAIRGAOS"
+      "login": "BELLOWSAI"
     },
     "commitCount": 2,
     "reviewCount": 3,
@@ -2513,7 +2513,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 30,
     "title": "feat(public-api): expose subscribedAt on people subscribeHistory",
     "state": "merged",
@@ -2528,7 +2528,7 @@
     "deletions": 2,
     "changedFiles": 5,
     "author": {
-      "login": "LEELAIRGAOS"
+      "login": "BELLOWSAI"
     },
     "commitCount": 3,
     "reviewCount": 0,
@@ -2557,7 +2557,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 31,
     "title": "Tests pr",
     "state": "closed",
@@ -2703,7 +2703,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 32,
     "title": "Local tests fix",
     "state": "merged",
@@ -2806,7 +2806,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 33,
     "title": "test: add integration test coverage for PeopleController client card endpoints",
     "state": "merged",
@@ -2986,7 +2986,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 34,
     "title": "fix: eliminate silent catch blocks — add error logging throughout",
     "state": "merged",
@@ -3253,9 +3253,9 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 35,
-    "title": "test: add leeloo-public-api smoke test harness",
+    "title": "test: add bellows-public-api smoke test harness",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -3760,7 +3760,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 36,
     "title": "Hotfix 0.79.8",
     "state": "merged",
@@ -3833,7 +3833,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 37,
     "title": "LEEL-10674 [fix] sales_plans_restriction in salesPlansController",
     "state": "merged",
@@ -3985,13 +3985,13 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 38,
-    "title": "LEEL-10905 Replacement of Powered by Leeloo link",
+    "title": "LEEL-10905 Replacement of Powered by Bellows link",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
-    "headRef": "LEEL-10905-replace-powered-by-leeloo-link",
+    "headRef": "LEEL-10905-replace-powered-by-bellows-link",
     "createdAt": "2026-05-12T11:52:15Z",
     "mergedAt": "2026-05-19T11:42:34Z",
     "closedAt": "2026-05-19T11:42:35Z",
@@ -4046,7 +4046,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 39,
     "title": "LEEL-10611 Smart response - internal LGT",
     "state": "merged",
@@ -4082,7 +4082,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 40,
     "title": "LEEL-10406 [fix] index all usernames to elastic",
     "state": "merged",
@@ -4215,7 +4215,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 41,
     "title": "LEEL-10812 [new] openai responses api",
     "state": "merged",
@@ -4428,7 +4428,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 42,
     "title": "LEEL-10852 [fix] ",
     "state": "merged",
@@ -4464,7 +4464,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 43,
     "title": "LEEL-10837 [fix] ",
     "state": "merged",
@@ -4544,7 +4544,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 44,
     "title": "LEEL-10760 [fix] correct connection stats count when date period is selected",
     "state": "merged",
@@ -4643,7 +4643,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 45,
     "title": "Hotfix 0.79.9",
     "state": "merged",
@@ -4687,7 +4687,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 46,
     "title": "LEEL-10434 Transfer utm when user opens offer page",
     "state": "merged",
@@ -4727,7 +4727,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 47,
     "title": "updated skills",
     "state": "merged",
@@ -4902,7 +4902,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 48,
     "title": "Hotfix 0.79.10",
     "state": "merged",
@@ -5036,7 +5036,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 49,
     "title": "LEEL-10406 [fix] username variable",
     "state": "merged",
@@ -5072,7 +5072,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 50,
     "title": "LEEL-10884 [new] sales plan statuses actions",
     "state": "merged",
@@ -5262,7 +5262,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 51,
     "title": "LEEL-10885 [new] lgt manual subscription",
     "state": "merged",
@@ -5357,7 +5357,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 52,
     "title": "feat(public-api): add filter[has_orders] to people.list",
     "state": "merged",
@@ -5464,7 +5464,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 53,
     "title": "feat: multi-touch attribution — aggregator + analytics endpoints + cleanup + feature flag",
     "state": "merged",
@@ -5802,9 +5802,9 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 54,
-    "title": "feat: extract feature-flags into leeloo-shared module",
+    "title": "feat: extract feature-flags into bellows-shared module",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -5986,7 +5986,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 55,
     "title": "Hotfix 0.79.11",
     "state": "merged",
@@ -6034,7 +6034,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 56,
     "title": "LEEL-10886 [FE] Manual subscription to LGT",
     "state": "merged",
@@ -6099,7 +6099,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 57,
     "title": "LEEL-10824 [feat] action block in CRM — wire save",
     "state": "merged",
@@ -6202,7 +6202,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 58,
     "title": "Remove manual Jira transition from pr skill",
     "state": "merged",
@@ -6238,7 +6238,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 59,
     "title": "docs: add Prettier as mandatory pre-push step",
     "state": "merged",
@@ -6318,7 +6318,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 60,
     "title": "LEEL-10936 [fix] external request max headers length 1500",
     "state": "merged",
@@ -6354,7 +6354,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 61,
     "title": "LEEL-10886 [FE] Manual subscription to LGT fixes",
     "state": "merged",
@@ -6434,7 +6434,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 62,
     "title": "LEEL-10869 [BE] Add action_block persistence to SalesPlanStatuses",
     "state": "merged",
@@ -6518,9 +6518,9 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 63,
-    "title": "LEEL-10905 [fix] update old leeloo.ai link in about.ejs widget info page",
+    "title": "LEEL-10905 [fix] update old bellows.ai link in about.ejs widget info page",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -6562,7 +6562,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 64,
     "title": "LEEL-10434 [fix] pass UTM marks from LGT offer button to created lead",
     "state": "merged",
@@ -6639,7 +6639,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 65,
     "title": "Hotfix 0.79.12",
     "state": "merged",
@@ -6683,7 +6683,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 66,
     "title": "LEEL-10908 [fix] analyticsIntegrations update validator",
     "state": "merged",
@@ -6740,7 +6740,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 67,
     "title": "LEEL-10434 Transfer utm when user opens offer page",
     "state": "merged",
@@ -6843,7 +6843,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 68,
     "title": "LEEL-10869 [FE] Action block in CRM — fix save",
     "state": "merged",
@@ -6942,7 +6942,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 69,
     "title": "LEEL-10886 [fix] include manual channel in LGT traffic validation",
     "state": "merged",
@@ -6978,7 +6978,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 70,
     "title": "LEEL-10808 [fix] dialogs stats",
     "state": "merged",
@@ -7035,7 +7035,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 71,
     "title": "LEEL-10807 [fix] max custom fields 149",
     "state": "merged",
@@ -7071,7 +7071,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 72,
     "title": "LEEL-10869 [FE] Action block in CRM",
     "state": "merged",
@@ -7170,7 +7170,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 73,
     "title": "LEEL-10434 Transfer utm when user opens offer page",
     "state": "merged",
@@ -7210,7 +7210,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 74,
     "title": "LEEL-10814 [fix] custom fields save returning 400 Not valid id param",
     "state": "merged",
@@ -7275,7 +7275,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 75,
     "title": "LEEL-10884 [fix] sales plan actions fix",
     "state": "merged",
@@ -7311,7 +7311,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 76,
     "title": "Leel 10884",
     "state": "merged",
@@ -7395,7 +7395,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 77,
     "title": "LEEL-10960 [feat] add deal data variables to SendExternalRequest block",
     "state": "merged",
@@ -7475,7 +7475,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 78,
     "title": "LEEL-10434 Transfer utm when user opens offer page",
     "state": "merged",
@@ -7532,7 +7532,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 79,
     "title": "LEEL-10008 LGT does not work correctly when going to instagram",
     "state": "merged",
@@ -7568,7 +7568,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 80,
     "title": "LEEL-10869 [fix] action block in CRM not saved / not executed",
     "state": "merged",
@@ -7625,7 +7625,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 81,
     "title": "LEEL-10814 [fix] custom fields order not persisting after page refresh",
     "state": "merged",
@@ -7682,7 +7682,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 82,
     "title": "LEEL-10434 [fix] Livr.Validator constructor in UTM_MARKS_QUERY_RULES tests",
     "state": "merged",
@@ -7722,7 +7722,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 83,
     "title": "LEEL-10886 [FE] Manual subscription to LGT",
     "state": "merged",
@@ -7758,7 +7758,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 84,
     "title": "E2E test harness",
     "state": "merged",
@@ -7858,7 +7858,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 85,
     "title": "[LEEL-10648] fix getRedirectFilter for reverse deals + Base E2E harness for tunnels",
     "state": "merged",
@@ -7980,7 +7980,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 86,
     "title": "Adjust workflow to autodeploy on dev",
     "state": "merged",
@@ -8020,7 +8020,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 87,
     "title": "fix(e2e): self-provision tunnel+block via app API",
     "state": "merged",
@@ -8081,7 +8081,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 88,
     "title": "LEEL-10656 Red block in tunnel generates incorrect JSON",
     "state": "merged",
@@ -8191,7 +8191,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 89,
     "title": "[LEEL-10857] Button text color does not change in LGT styling",
     "state": "merged",
@@ -8348,7 +8348,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 90,
     "title": "fix(e2e): send X-CSRF-TOKEN header on raw tunnel API requests",
     "state": "merged",
@@ -8405,7 +8405,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 91,
     "title": "LEEL-10946 [fix] fb analytics",
     "state": "merged",
@@ -8500,7 +8500,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 92,
     "title": "Hotfix 0.79.13",
     "state": "merged",
@@ -8544,7 +8544,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 93,
     "title": "[LEEL-10933] Fix checkbox on \"audience page\"",
     "state": "merged",
@@ -8687,7 +8687,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 94,
     "title": "LEEL-10959 [fix] Sales Tunnel builder crash on empty media-group",
     "state": "merged",
@@ -8727,7 +8727,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 95,
     "title": "[fix] gate localhost-only e2e tests to local env",
     "state": "merged",
@@ -8763,7 +8763,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 96,
     "title": "LEEL-10966 [fix] External Request ships valid JSON when variable breaks body [NEED SEPARATE TESTING]",
     "state": "merged",
@@ -8807,7 +8807,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 97,
     "title": "[ci] add manual kill-switch for dev autodeploy",
     "state": "merged",
@@ -8843,7 +8843,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 98,
     "title": "LEEL-10468 Chat Error | Template window",
     "state": "merged",
@@ -8912,7 +8912,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 99,
     "title": "LEEL-10272 [fix] Notification panel visual problems",
     "state": "merged",
@@ -9000,7 +9000,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 100,
     "title": "LEEL-10075 [fix] Offers UI bugs: percent input NaN + silent save validation",
     "state": "merged",
@@ -9065,7 +9065,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 101,
     "title": "LEEL-10857 [fix] LGT button text color not applying (reopened)",
     "state": "merged",
@@ -9101,7 +9101,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 102,
     "title": "LEEL-10869 [fix] CRM action block: open send-external-request in a modal",
     "state": "merged",
@@ -9227,7 +9227,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 103,
     "title": "LEEL-10869 [fix] CRM action block: validation toast, defer validation, ext-request overflow",
     "state": "merged",
@@ -9296,13 +9296,13 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 104,
     "title": "ci: auto-comment Jira ticket on merged frontend-fix PRs",
     "state": "closed",
@@ -9440,7 +9440,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 105,
     "title": "CI for jira updates",
     "state": "merged",
@@ -9562,7 +9562,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 106,
     "title": "LEEL-10075 [fix] Offers percent input: post-% text gluing + comma decimal",
     "state": "merged",
@@ -9598,13 +9598,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 107,
     "title": "LEEL-10869 [fix] CRM action card overflow: long ext-request URL grows past column",
     "state": "merged",
@@ -9640,13 +9640,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 108,
     "title": "LEEL-10075 [fix] Offers percent input: two-digit entry + stray decimal",
     "state": "merged",
@@ -9686,13 +9686,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 109,
     "title": "LEEL-10985: E2E coverage for Offers percent input (save→reopen persistence + QA)",
     "state": "merged",
@@ -9761,7 +9761,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 110,
     "title": "LEEL-10984 [fix] External request block crash on viewing request body",
     "state": "merged",
@@ -9805,13 +9805,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 111,
     "title": "LEEL-10729 [fix] Audience communication-channels counter goes blank",
     "state": "merged",
@@ -9855,13 +9855,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 112,
     "title": "LEEL-10541 [fix] Quote formatting in blue block lost in Telegram",
     "state": "merged",
@@ -9939,13 +9939,13 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 113,
     "title": "LEEL-10983 [fix] Video size validation on synchronized message blocks",
     "state": "merged",
@@ -10006,15 +10006,15 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 114,
-    "title": "ci: run leeloo-frontend-fix flow in GitHub Actions",
+    "title": "ci: run bellows-frontend-fix flow in GitHub Actions",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -10241,7 +10241,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 115,
     "title": "LEEL-10729 [fix] Audience communication-channels counter returns 0 on filters",
     "state": "merged",
@@ -10518,7 +10518,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 116,
     "title": "Actualize CI claude docs",
     "state": "merged",
@@ -10554,7 +10554,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 117,
     "title": "Make jira bot work with SA token",
     "state": "merged",
@@ -10652,7 +10652,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 118,
     "title": "fix(ci): route gather-jira-context through Atlassian gateway",
     "state": "merged",
@@ -10688,7 +10688,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 119,
     "title": "Autobot 2",
     "state": "merged",
@@ -10766,7 +10766,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 120,
     "title": "LEEL-10962 [fix] копіювання/вставлення змінних у Request body зі збереженням типу",
     "state": "merged",
@@ -10814,14 +10814,14 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix",
+      "bellows-frontend-fix",
       "plan-approved"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 121,
     "title": "ci(frontend-fix): merge plan/implement/review into one-shot workflow",
     "state": "merged",
@@ -10882,7 +10882,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 122,
     "title": "LEEL-10916 [fix]",
     "state": "merged",
@@ -10918,13 +10918,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 123,
     "title": "feat(frontend-fix): pull Jira image attachments into AI context",
     "state": "merged",
@@ -10985,7 +10985,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 124,
     "title": "LEEL-10094 [fix] перевірка пермішину перед запитом задач у чаті/CRM",
     "state": "merged",
@@ -11025,13 +11025,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 125,
     "title": "Improvements",
     "state": "merged",
@@ -11115,7 +11115,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 126,
     "title": "LEEL-10927 [fix]",
     "state": "merged",
@@ -11176,13 +11176,13 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 127,
     "title": "LEEL-9762 [fix] Send external request bugs",
     "state": "merged",
@@ -11218,13 +11218,13 @@
     "reviews": [],
     "threads": [],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 128,
     "title": "LEEL-10995 fix(e2e-stack): fix uploads EACCES + fail fast on app crash",
     "state": "merged",
@@ -11268,7 +11268,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 129,
     "title": "LEEL-10995 perf(e2e-stack): configurable runner (E2E_RUNNER) + parallelization analysis",
     "state": "merged",
@@ -11304,7 +11304,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 130,
     "title": "Hotfix 0.79.14",
     "state": "merged",
@@ -11392,7 +11392,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 131,
     "title": "Hotfix 0.79.15",
     "state": "merged",
@@ -11440,7 +11440,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 132,
     "title": "Hotfix 0.79.16",
     "state": "merged",
@@ -11528,7 +11528,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 133,
     "title": "ci: feature-env image build (ArgoCD-driven deploy)",
     "state": "merged",
@@ -11668,7 +11668,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 134,
     "title": "docs: AI engineer workflow guide + feature-env deploy from remote-fix",
     "state": "merged",
@@ -11838,13 +11838,13 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 135,
-    "title": "feat(skills): add leeloo-backend-fix + leeloo-fullstack-fix skills",
+    "title": "feat(skills): add bellows-backend-fix + bellows-fullstack-fix skills",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
-    "headRef": "leeloo-back-fix",
+    "headRef": "bellows-back-fix",
     "createdAt": "2026-07-07T05:21:26Z",
     "mergedAt": "2026-07-08T18:58:21Z",
     "closedAt": "2026-07-08T18:58:21Z",
@@ -12139,7 +12139,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 136,
     "title": "LEEL-10373 Pop-up (modal) notifications via Admin platform",
     "state": "merged",
@@ -12313,15 +12313,15 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix",
+      "bellows-frontend-fix",
       "feature-env",
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 137,
     "title": "test(lgt): Tier-1 frontend unit coverage for Lead Generation Tools",
     "state": "merged",
@@ -12397,7 +12397,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 138,
     "title": "feat(feature-env): namespace notification collections + gate cron by env",
     "state": "merged",
@@ -12476,7 +12476,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 139,
     "title": "test(offers): harden Offers coverage (Jest + Mocha) + fix find empty-ids filter",
     "state": "merged",
@@ -12554,7 +12554,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 140,
     "title": "Lokalise: Translations update",
     "state": "merged",
@@ -12630,7 +12630,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 141,
     "title": "Release 0.80.0",
     "state": "merged",
@@ -12909,7 +12909,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 142,
     "title": "Hotfix 0.80.1",
     "state": "merged",
@@ -12997,7 +12997,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 143,
     "title": "LEEL-11013 [fix] Reports: graceful handling of failed data load",
     "state": "open",
@@ -13054,15 +13054,15 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix"
+      "bellows-frontend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 144,
-    "title": "ci(frontend-fix): install leeloo-externals deps before Jest",
+    "title": "ci(frontend-fix): install bellows-externals deps before Jest",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -13096,7 +13096,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 145,
     "title": "Hotfix 0.80.2",
     "state": "merged",
@@ -13152,7 +13152,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 146,
     "title": "Hotfix 0.80.4",
     "state": "merged",
@@ -13233,7 +13233,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 147,
     "title": "Hotfix 0.80.3",
     "state": "merged",
@@ -13277,7 +13277,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 148,
     "title": "LEEL-10729 [fix] null value in aiIntegrationsFilter",
     "state": "closed",
@@ -13334,7 +13334,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 149,
     "title": "feat(mcp): in-app tunnel-builder tool surface on POST /mcp",
     "state": "open",
@@ -19277,7 +19277,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 150,
     "title": "Hotfix 0.80.5",
     "state": "merged",
@@ -19380,7 +19380,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 151,
     "title": "Hotfix 0.80.6",
     "state": "merged",
@@ -19424,7 +19424,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 152,
     "title": "Hotfix 0.80.7",
     "state": "merged",
@@ -19527,9 +19527,9 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 153,
-    "title": "feat(mcp): expose authenticated /mcp endpoint in leeloo-app (OAuth 2.1, no tools)",
+    "title": "feat(mcp): expose authenticated /mcp endpoint in bellows-app (OAuth 2.1, no tools)",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -21018,7 +21018,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 154,
     "title": "LEEL-11021 [fix] execute deal status actions on deal add",
     "state": "merged",
@@ -21113,7 +21113,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 155,
     "title": "Hotfix 0.80.8",
     "state": "merged",
@@ -21258,7 +21258,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 156,
     "title": "Hotfix 0.80.9",
     "state": "merged",
@@ -21380,7 +21380,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 157,
     "title": "Hotfix 0.80.10",
     "state": "merged",
@@ -21464,9 +21464,9 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 158,
-    "title": "LEEL-11017 [fix] move checkElasticIncidesReindex to leeloo-reindexer",
+    "title": "LEEL-11017 [fix] move checkElasticIncidesReindex to bellows-reindexer",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -21559,7 +21559,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 159,
     "title": "Hotfix 0.80.11",
     "state": "merged",
@@ -21704,7 +21704,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 160,
     "title": "[fix] deflake SendersCron checkSender test",
     "state": "merged",
@@ -21789,7 +21789,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 161,
     "title": "Hotfix 0.80.13",
     "state": "merged",
@@ -21961,7 +21961,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 162,
     "title": "Hotfix 0.80.12",
     "state": "merged",
@@ -22102,7 +22102,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 163,
     "title": "Hotfix 0.80.14",
     "state": "merged",
@@ -22228,7 +22228,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 164,
     "title": "LEEL-10956 [fix] dont stop accounts on company status change",
     "state": "merged",
@@ -22342,7 +22342,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 165,
     "title": "Hotfix 0.80.15",
     "state": "merged",
@@ -22472,7 +22472,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 166,
     "title": "Hotfix 0.80.16",
     "state": "merged",
@@ -22556,7 +22556,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 167,
     "title": "LEEL-10913 [fix] instant bulk actions for small audiences",
     "state": "merged",
@@ -22917,7 +22917,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 168,
     "title": "LEEL-11037 fix: updateFilter no longer wipes saved person-filter on rename",
     "state": "merged",
@@ -23001,13 +23001,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 169,
     "title": "LEEL-11038 fix: preserve whatsapp template approval on message-block re-save",
     "state": "merged",
@@ -23627,13 +23627,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 170,
     "title": "Add support-triage skill: classify Jira ticket as bug or feature",
     "state": "merged",
@@ -24464,7 +24464,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 171,
     "title": "Hotfix 0.80.17",
     "state": "merged",
@@ -24754,7 +24754,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 172,
     "title": "LEEL-11041: reject relation create when button not attached to block",
     "state": "merged",
@@ -24892,13 +24892,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 173,
     "title": "fix(bulk-actions): guard instant processing against a PROCESSING sibling",
     "state": "merged",
@@ -24955,7 +24955,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 174,
     "title": "Run backend tests in parallel across git worktrees",
     "state": "merged",
@@ -25188,7 +25188,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 175,
     "title": "LEEL-11063: name the failing ai_action subfield instead of a bare FORMAT_ERROR",
     "state": "merged",
@@ -25597,13 +25597,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 176,
     "title": "LEEL-11065: reject ai_integration_id on AI assistant tunnel actions instead of dropping it",
     "state": "merged",
@@ -25942,14 +25942,14 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix",
-      "leeloo-backend-fix"
+      "bellows-frontend-fix",
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 177,
     "title": "LEEL-11062: validate telegram_chat_id as a mongo object id on TELEGRAM_* actions",
     "state": "merged",
@@ -26027,13 +26027,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 178,
     "title": "LEEL-11064: name the expected container on person-filter predicates instead of a bare FORMAT_ERROR",
     "state": "merged",
@@ -26143,13 +26143,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 179,
     "title": "LEEL-11033: store tag_id on WhatsApp offer actions + actions coverage",
     "state": "merged",
@@ -26503,13 +26503,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 180,
     "title": "build: stop rebuilding test images on every local run",
     "state": "merged",
@@ -26727,7 +26727,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 181,
     "title": "LEEL-11033: drop the stale actions FIXME from create_offer",
     "state": "merged",
@@ -26763,7 +26763,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 182,
     "title": "[fix] some read props of undefined",
     "state": "merged",
@@ -26896,7 +26896,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 183,
     "title": "LEEL-11082: make the backend integration suite deterministic",
     "state": "merged",
@@ -27235,7 +27235,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 184,
     "title": "LEEL-11043: return 400 for offer rejections raised after LIVR",
     "state": "merged",
@@ -27836,13 +27836,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 185,
     "title": "LEEL-11022: gate each LGT channel popup info on its own connection",
     "state": "merged",
@@ -28115,13 +28115,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 186,
     "title": "LEEL-11023: reject fb-ad leadgentools without facebook ad settings",
     "state": "merged",
@@ -28379,13 +28379,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 187,
     "title": "test(LEEL-11054): reproducing tests for the AI assistant going silent",
     "state": "open",
@@ -28480,7 +28480,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 188,
     "title": "[Need data check] LEEL-11091: align LGT popup-info is_custom_thank_you_page default with the UI",
     "state": "open",
@@ -28626,13 +28626,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 189,
     "title": "LEEL-11036: MCP LGT public_url uses the company white-label host",
     "state": "open",
@@ -28754,13 +28754,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 190,
     "title": "LEEL-10983 [fix] validate video size against every synced messenger's own cap",
     "state": "merged",
@@ -28882,14 +28882,14 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix",
+      "bellows-frontend-fix",
       "feature-env"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 191,
     "title": "Hotfix 0.80.18",
     "state": "merged",
@@ -29723,7 +29723,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 192,
     "title": "LEEL-10522 [test] red coverage for the tag-reference defects",
     "state": "closed",
@@ -30104,7 +30104,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 193,
     "title": "LEEL-11101: stop validate_tunnel from burying real orphans in false UNREACHABLE_BLOCK",
     "state": "merged",
@@ -30964,13 +30964,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 194,
     "title": "LEEL-11105: stop the tunnel traversal past the recursion limit",
     "state": "closed",
@@ -31400,13 +31400,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 195,
     "title": "docs: require a reviewed script before querying a real database",
     "state": "merged",
@@ -31486,7 +31486,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 196,
     "title": "docs(support-triage): check the reported path still runs",
     "state": "merged",
@@ -31789,7 +31789,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 197,
     "title": "docs: engineering rules for collection-wide production scripts",
     "state": "merged",
@@ -31961,7 +31961,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 198,
     "title": "LEEL-10962 [fix] fix false unsaved-changes prompt on Send External Request action blocks",
     "state": "open",
@@ -32512,14 +32512,14 @@
       }
     ],
     "labels": [
-      "leeloo-frontend-fix",
+      "bellows-frontend-fix",
       "feature-env"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 199,
     "title": "LEEL-11028: stop MCP validate/preview answering off unread data",
     "state": "open",
@@ -34047,13 +34047,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 200,
     "title": "LEEL-11027: bind websocket handshake to its session; cover MCP token rejection",
     "state": "open",
@@ -34380,15 +34380,15 @@
     ],
     "labels": [
       "feature-env",
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 201,
-    "title": "LEEL-11026: seal the bound leeloo session at rest in the MCP OAuth store",
+    "title": "LEEL-11026: seal the bound bellows session at rest in the MCP OAuth store",
     "state": "merged",
     "isDraft": false,
     "baseRef": "dev",
@@ -34720,13 +34720,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 202,
     "title": "LEEL-11032: stop duplicate_tunnel from 500-ing on an empty body",
     "state": "merged",
@@ -34904,13 +34904,13 @@
       }
     ],
     "labels": [
-      "leeloo-backend-fix"
+      "bellows-backend-fix"
     ],
     "truncated": []
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 203,
     "title": "LEEL-11054: log AI provider failures with account context",
     "state": "open",
@@ -35005,7 +35005,7 @@
   },
   {
     "provider": "github",
-    "repo": "Leeloo-AI-RGA-OS/leeloo.ai",
+    "repo": "Bellows-AI/bellows.ai",
     "number": 204,
     "title": "ci: PR reviewer reports real check results, severity-gated",
     "state": "merged",

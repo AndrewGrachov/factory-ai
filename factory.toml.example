@@ -32,7 +32,7 @@ name = "Acme Inc"
 #
 # Cost scales: a full reconciliation is ~243 rate-limit points PER repo against a 5000/hour budget,
 # so the sync TTL floor below is multiplied by the number of repos listed.
-repos = ["leeloo.ai"]
+repos = ["web", "other-owner/some-service"]
 
 # Where this organization's checkouts live: one clone per repo above, at
 # `<workspace_root>/<id>/<repo name>`. Cloned at boot, in the background — nothing the dashboard
@@ -63,7 +63,7 @@ owner = "ExampleOwner"
 base_branch = "dev"
 
 # Reviewers listed here are classed as bots. An entry cannot contain a comma.
-bots = ["claude", "claude[bot]", "github-actions", "github-actions[bot]", "leeloo-frontend-fix-bot"]
+bots = ["claude", "claude[bot]", "github-actions", "github-actions[bot]", "bellows-frontend-fix-bot"]
 
 [server]
 port = 8080
@@ -122,6 +122,11 @@ session_ttl_hours = 336
 # one thing standing between turning auth on and locking everybody out. Afterwards use
 # `npm run invite`.
 bootstrap_admin = ""
+
+# Members of this GitHub organization admit themselves, as ordinary members, on first sign-in.
+# Empty keeps invite-only membership; invites keep working either way, which is how somebody
+# outside the org gets in. Costs the zero-scopes property — read:org is requested when it is set.
+auto_join_github_org = ""
 
 # Optional shared secret for the telemetry ingest routes (X-Factory-Ingest-Token). Unset leaves
 # them open, which is what the collector and the laptop plugin expect.

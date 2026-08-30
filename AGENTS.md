@@ -63,7 +63,15 @@ npm run verify:ui      # needs: a running timescale, and `npx playwright install
 # real ones once written, and there is no way to separate them afterwards.
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run seed
 
-docker compose up --build   # SPA + API on 127.0.0.1:8080, TimescaleDB, OTEL collector
+# Compose is an infrastructure wrapper, not a shipping vehicle. It runs the same `npm run dev` as
+# above against the bind-mounted working tree: API on 127.0.0.1:8080 (tsx watch), Vite on 5173
+# (HMR), plus TimescaleDB and the OTEL collector. Edits are live with no rebuild — the image carries
+# no source. node_modules lives in named volumes, so a restart is ~10s and `down -v` forces a clean
+# reinstall. There is no `--build` to remember and no baked image to go stale.
+docker compose up
+
+# What deploys, and what compose does NOT run: the baked `runtime` stage, SPA and API on one port.
+docker build -f docker/Dockerfile --target runtime -t factory-ai .
 
 # The driver is behind a profile, so the line above never starts it: it mounts the docker socket,
 # which is root on the host. See docs/security.md.
@@ -83,9 +91,11 @@ DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_test npm run test
 npm run test:jobs
 
 # Accounts. AUTH_MODE defaults to `none`, where every route is open and the bind address is the
-# access control, exactly as before. With AUTH_MODE=github somebody has to be invited before they
-# can sign in — and after 010 an existing database has nobody in it, which presents as "auth is
-# broken" rather than "nobody has been invited". auth.bootstrap_admin covers the first person.
+# access control — that is what `npm run dev`, seed, verify:ui and test-jobs run. `docker compose`
+# is the exception and pins `github`, uncontestable by factory.toml, because that stack holds the
+# checkouts. Somebody has to be invited before they can sign in — and after 010 an existing database
+# has nobody in it, which presents as "auth is broken" rather than "nobody has been invited".
+# auth.bootstrap_admin covers the first person.
 npm run invite -- --login <github-login> [--role admin|member] [--remove]
 npm run invite -- --list
 

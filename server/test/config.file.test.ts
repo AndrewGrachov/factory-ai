@@ -127,15 +127,15 @@ ttl_seconds = 45
     });
 
     it('accepts an [organization] table and defaults the id', () => {
-        const { config } = resolve('[organization]\nname = "Leeloo AI"\n');
+        const { config } = resolve('[organization]\nname = "Bellows AI"\n');
         expect(config.orgId).toBe('default');
-        expect(config.orgName).toBe('Leeloo AI');
+        expect(config.orgName).toBe('Bellows AI');
     });
 
     it('names the TOML key when the organization id is illegal', () => {
         // Pins explain()'s provenance rewriting for the new keys — the only non-mechanical part of
         // the file layer's half of this change.
-        expect(() => resolve('[organization]\nid = "Leeloo AI"\n')).toThrow(
+        expect(() => resolve('[organization]\nid = "Bellows AI"\n')).toThrow(
             /ORG_ID must be[\s\S]*organization\.id/,
         );
     });

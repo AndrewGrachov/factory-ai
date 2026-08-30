@@ -30,8 +30,13 @@ export interface AuthStore {
      * Returns null when nobody has invited this login to the given organization — which is a
      * refusal, not an error: an account is created either way, because the identity is a fact, but
      * without a membership there is nothing to sign in to.
+     *
+     * `autoJoin` creates that missing membership instead of refusing, as an ordinary `member`. It is
+     * a parameter rather than a config read because the decision is not this layer's to make: the
+     * caller passes it only after GitHub has confirmed the org, and a store that could admit anyone
+     * on its own would be one bad default away from an open deployment.
      */
-    signIn(identity: GitHubIdentity, orgId: string): Promise<Caller | null>;
+    signIn(identity: GitHubIdentity, orgId: string, options?: { autoJoin?: boolean }): Promise<Caller | null>;
     createSession(tokenHash: Buffer, userId: string, expiresAt: Date): Promise<void>;
     /** The caller behind a live session token, or null if it is unknown, expired, or unmembered. */
     findSession(tokenHash: Buffer, orgId: string): Promise<Caller | null>;
@@ -97,7 +102,7 @@ export function createAuthStore({ sql, ready }: { sql: Sql; ready?: Promise<unkn
     };
 
     return {
-        async signIn(identity, orgId) {
+        async signIn(identity, orgId, options) {
             await gate();
             const login = identity.login.toLowerCase();
 
@@ -133,6 +138,19 @@ export function createAuthStore({ sql, ready }: { sql: Sql; ready?: Promise<unkn
                   )
             `;
 
+            const claimed = await memberOf(userId, orgId);
+            if (claimed || !options?.autoJoin) return claimed;
+
+            // Already bound to this account, so there is no unclaimed row for a freed login to
+            // capture and the `user_id is null` guard above has nothing to do here. `do nothing`
+            // rather than an update: a login with an *unclaimed* invite reached the branch above and
+            // never gets here, so a conflict at this point is a concurrent second sign-in of this
+            // same account, and the role it already has must win over a fresh `member`.
+            await sql`
+                insert into org_membership (org_id, github_login, role, user_id, claimed_at)
+                values (${orgId}, ${login}, 'member', ${userId}, now())
+                on conflict (org_id, github_login) do nothing
+            `;
             return memberOf(userId, orgId);
         },
 

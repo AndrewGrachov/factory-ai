@@ -90,17 +90,26 @@ if (config.auth.mode === 'github') {
     if (config.auth.authorizeUrl !== 'https://github.com/login/oauth/authorize') {
         console.warn(`[auth] NOT using github.com: authorize URL is ${config.auth.authorizeUrl}`);
     }
+    if (config.auth.autoJoinGithubOrg) {
+        console.log(
+            `[auth] members of the GitHub organization "${config.auth.autoJoinGithubOrg}" join on first sign-in; read:org is requested`,
+        );
+    }
     // The upgrade lockout, caught before somebody spends an afternoon on it: after 010 an existing
     // database has rows, no users and no memberships, and every route then 401s with nothing said.
-    void ready
-        .then(() => authStore.listMembers(config.orgId))
-        .then((members) => {
-            if (members.length) return;
-            console.warn(
-                `[auth] "${config.orgId}" has no members, so nobody can sign in. Set auth.bootstrap_admin, or run: npm run invite -- --org ${config.orgId} --login <github-login> --role admin`,
-            );
-        })
-        .catch(() => {});
+    // Not a lockout when auto-join is on, though — an empty roster is the expected state there,
+    // because the first member of the GitHub org to sign in creates their own row.
+    if (!config.auth.autoJoinGithubOrg) {
+        void ready
+            .then(() => authStore.listMembers(config.orgId))
+            .then((members) => {
+                if (members.length) return;
+                console.warn(
+                    `[auth] "${config.orgId}" has no members, so nobody can sign in. Set auth.bootstrap_admin, or run: npm run invite -- --org ${config.orgId} --login <github-login> --role admin`,
+                );
+            })
+            .catch(() => {});
+    }
 } else {
     // Unconditional and blunt, in the register of the "[fetch] no GITHUB_TOKEN" line above: the
     // whole point of AUTH_MODE being an explicit enum is that nobody arrives here by accident, and

@@ -14,7 +14,7 @@ import type { TelemetryClient, TelemetryHealth } from '../src/telemetry/client.j
 
 const TELEMETRY_FIXTURE = new URL('../../core/test/fixtures/telemetry-sessions.json', import.meta.url);
 
-export const TEST_REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
+export const TEST_REPO = 'Bellows-AI/bellows.ai';
 
 let payload: CanonicalPr[] | null = null;
 /** Mapped through the adapter, like both real clients do, rather than read pre-canonicalised. */
@@ -45,9 +45,9 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     return {
         orgId: 'test-org',
         orgName: 'Test Org',
-        repos: [{ owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' }],
+        repos: [{ owner: 'Bellows-AI', name: 'bellows.ai' }],
         baseBranch: 'dev',
-        bots: ['claude', 'claude[bot]', 'github-actions', 'github-actions[bot]', 'leeloo-frontend-fix-bot'],
+        bots: ['claude', 'claude[bot]', 'github-actions', 'github-actions[bot]', 'bellows-frontend-fix-bot'],
         syncTtlMs: 60_000,
         port: 0,
         host: '127.0.0.1',
@@ -79,6 +79,7 @@ export function githubAuth(overrides: Partial<Extract<AuthConfig, { mode: 'githu
         cookieSecure: false,
         publicUrl: 'http://127.0.0.1:8080',
         bootstrapAdmin: null,
+        autoJoinGithubOrg: null,
         ingestToken: null,
         authorizeUrl: 'https://github.test/login/oauth/authorize',
         tokenUrl: 'https://github.test/login/oauth/access_token',
@@ -368,7 +369,7 @@ export function memoryAuthStore(): MemoryAuthStore {
             });
         },
 
-        async signIn(identity, orgId) {
+        async signIn(identity, orgId, options) {
             const login = identity.login.toLowerCase();
             let user = users.find((u) => u.githubUserId === identity.githubUserId);
             if (user) {
@@ -392,6 +393,13 @@ export function memoryAuthStore(): MemoryAuthStore {
                 if (members.some((m) => m.orgId === member.orgId && m.userId === user.id)) continue;
                 member.userId = user.id;
                 member.claimed = true;
+            }
+            const claimed = memberOf(user.id, orgId);
+            if (claimed || !options?.autoJoin) return claimed;
+            // Mirrors the SQL store's `on conflict do nothing`: an existing row for this login keeps
+            // whatever role it has rather than being reset to `member`.
+            if (!members.some((m) => m.orgId === orgId && m.login === login)) {
+                members.push({ orgId, login, userId: user.id, role: 'member', claimed: true });
             }
             return memberOf(user.id, orgId);
         },
@@ -485,6 +493,10 @@ export interface IdentityStub extends GitHubIdentityClient {
     /** What the next exchange resolves to. Set per test. */
     next: GitHubIdentity;
     exchanges: string[];
+    /** What GitHub says about the auto-join organization. Set per test. */
+    orgState: 'active' | 'pending' | 'none';
+    /** Every org the callback asked about, so a test can assert it did not ask at all. */
+    orgLookups: string[];
 }
 
 export function stubIdentityClient(identity?: Partial<GitHubIdentity>): IdentityStub {
@@ -497,6 +509,8 @@ export function stubIdentityClient(identity?: Partial<GitHubIdentity>): Identity
             ...identity,
         },
         exchanges: [],
+        orgState: 'none',
+        orgLookups: [],
         authorizeUrl: (state) => `https://github.test/login/oauth/authorize?state=${state}`,
         async exchange(code) {
             stub.exchanges.push(code);
@@ -504,6 +518,10 @@ export function stubIdentityClient(identity?: Partial<GitHubIdentity>): Identity
         },
         async identity() {
             return stub.next;
+        },
+        async orgMembership(_accessToken, org) {
+            stub.orgLookups.push(org);
+            return stub.orgState;
         },
     };
     return stub;

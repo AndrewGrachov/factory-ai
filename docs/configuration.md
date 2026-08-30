@@ -41,7 +41,7 @@ record, so env wins by merge order.
   but the org id leads every stored primary key — a literal default would clobber the file's
   `organization.id` on every start and repartition the database under the operator. `ORG_REPOS`
   follows suit, one step less severe. This also fixes the pre-existing case where
-  `GITHUB_REPOS: ${GITHUB_REPOS:-leeloo.ai}` silently overrode a mounted file's repo list.
+  `GITHUB_REPOS: ${GITHUB_REPOS:-bellows.ai}` silently overrode a mounted file's repo list.
 - **A missing `FACTORY_CONFIG` path is fatal; a missing default path is silent.** One is an
   explicit request that could not be honoured, the other is the supported env-only mode that the
   test suite and CI run in.

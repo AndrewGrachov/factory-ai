@@ -78,7 +78,7 @@ Two things about that join are not obvious:
   `sessionsWithoutHook` grows without bound — indistinguishable from the plugin being broken.
 
 The plugin is installed at **user scope**, not into this repo, because the dashboard reports on
-`leeloo.ai` and the sessions that matter happen there. See
+`bellows.ai` and the sessions that matter happen there. See
 `plugins/agent-telemetry/README.md`.
 
 Metric definitions and the reasoning behind them live in `../factory-stats/SPEC.md` (outside this

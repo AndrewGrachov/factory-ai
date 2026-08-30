@@ -4,9 +4,15 @@ Read before: touching `org_id` anywhere, `server/migrations/005_organizations.sq
 or the org selector in the topbar.
 
 An **organization owns the repo list and partitions every stored row.** There is exactly one per
-deployment, defined by `[organization]` in `factory.toml`, with no accounts and no memberships —
-`meta.organization.mode` is the literal `'config'`. The selector in the topbar is a real
-`<select disabled>`; mode 2 turns it on by dropping one attribute.
+deployment, defined by `[organization]` in `factory.toml` — `meta.organization.mode` is the literal
+`'config'`. The selector in the topbar is a real `<select disabled>`; mode 2 turns it on by dropping
+one attribute.
+
+**There are accounts and memberships now** (see [auth.md](auth.md)), and that changed less here than
+it looks. Signing in checks a caller's membership against the one configured organization rather than
+selecting between several, so the store still binds `orgId` at construction and `mode` is still
+`'config'`. Mode 2 is what makes the org a property of the *caller* rather than of the process, and
+it has not been built.
 
 - **`ORG_ID` defaults to the literal `default`, and `ORG_NAME` to `GITHUB_OWNER`.** The id leads
   every org-owned primary key, so deriving it from the owner would re-key every persisted row the
@@ -16,7 +22,7 @@ deployment, defined by `[organization]` in `factory.toml`, with no accounts and 
   not an obstacle to work around.
 - **The id is rejected, never normalised** (`^[a-z0-9][a-z0-9_-]{0,38}$`, no leading `__`). It is
   simultaneously a database key and a URL parameter, and a case-insensitive collision in a key is
-  invisible: `Leeloo` and `leeloo` are two partitions that read as one. Silently lowercasing would
+  invisible: `Bellows` and `bellows` are two partitions that read as one. Silently lowercasing would
   leave the file, the database and the query string disagreeing.
 - **`GITHUB_REPOS` and `github.repos` are fatal, not ignored.** The one deliberate exception to "an
   unknown environment variable is ignored", and for exactly the reason that rule is stated: a
@@ -44,7 +50,7 @@ deployment, defined by `[organization]` in `factory.toml`, with no accounts and 
   week. Guarded by "still reports a hook-less session, which belongs to no organization".
 - **Pre-organization rows are backfilled `'__unclaimed__'` and adopted once, at boot.**
   `005_organizations.sql` cannot see the config, and backfilling the configured id directly would
-  point a deployment that sets `ORG_ID=leeloo` at an empty partition: **200 OK, zero PRs, no log
+  point a deployment that sets `ORG_ID=bellows` at an empty partition: **200 OK, zero PRs, no log
   line**. `adoptOrg()` in `db/migrate.ts` claims them, which is why `migrate()` takes a required
   `orgId` and why `config.ts` refuses any id beginning with `__`.
 - **The four child FKs are `on update cascade`, and `ORG_OWNED` deliberately omits those tables.**
@@ -61,10 +67,18 @@ deployment, defined by `[organization]` in `factory.toml`, with no accounts and 
 - **There is no `OrgProvider` interface, deliberately.** `TokenProvider` and `ForgeClient` are the
   tempting precedents, but both ship two implementations already in tree and both have a signature
   that was load-bearing on day one. A directory's org list is per *user*, so its real signature is
-  `resolve(caller, orgId)` in a codebase with no caller, no session and no auth — the interface
-  would change shape the day its second implementation arrived, having bought nothing but a
-  provider threaded through `buildApp` and the service deps. The room mode 2 needs is in the *data
-  shape* (`mode` + `available[]`) and in the store's construction-time org binding. Do not add one
-  later for symmetry.
+  `resolve(caller, orgId)` — which this bullet originally noted was meaningless "in a codebase with
+  no caller, no session and no auth". There is now a caller and a session, and the conclusion is
+  unchanged: there is still no *directory*, `resolveOrg` is still one function taking the configured
+  org, and the room mode 2 needs is still in the *data shape* (`mode` + `available[]`) and in the
+  store's construction-time org binding. When mode 2 arrives this becomes a wider signature on the
+  same function, not a provider. Do not add one for symmetry.
+- **`app_user` and `session` are NOT org-owned; `org_membership` is.** `005_organizations.sql` picks
+  org-owned tables as "exactly those that already carry `repo`", and a GitHub identity carries none.
+  The consequence if it were keyed by organization: one human becomes two accounts with two ids, and
+  the per-user Claude credential planned on top of that id is the person's, not the organization's.
 - **The store binds `orgId` at construction**, not per call: it is a constant for the life of the
-  process, and it is the shape a request-scoped store needs later anyway.
+  process, and it is the shape a request-scoped store needs later anyway. **`createAuthStore` is the
+  one exception** and takes the organization per call, because it is what *decides* whether a caller
+  belongs to one — and because a worker token's lookup cannot start from an organization at all,
+  being the thing that reports which one a driver is working for.

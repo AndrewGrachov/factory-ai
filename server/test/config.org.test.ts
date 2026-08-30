@@ -15,13 +15,13 @@ describe('the organization', () => {
     });
 
     it('labels the organization with the github owner when no name is given', () => {
-        expect(loadConfig(env()).orgName).toBe('Leeloo-AI-RGA-OS');
+        expect(loadConfig(env()).orgName).toBe('Bellows-AI');
         expect(loadConfig(env({ GITHUB_OWNER: 'acme' })).orgName).toBe('acme');
-        expect(loadConfig(env({ ORG_NAME: 'Leeloo AI' })).orgName).toBe('Leeloo AI');
+        expect(loadConfig(env({ ORG_NAME: 'Bellows AI' })).orgName).toBe('Bellows AI');
     });
 
     it('treats an empty ORG_NAME as unset, so the selector is never blank', () => {
-        expect(loadConfig(env({ ORG_NAME: '   ' })).orgName).toBe('Leeloo-AI-RGA-OS');
+        expect(loadConfig(env({ ORG_NAME: '   ' })).orgName).toBe('Bellows-AI');
     });
 
     it('treats an empty ORG_ID as unset, consistent with every other empty value', () => {
@@ -31,15 +31,15 @@ describe('the organization', () => {
 
     it('rejects an id that cannot be a database key or a URL parameter', () => {
         // Rejected rather than normalised. A case-insensitive collision in a key is invisible:
-        // "Leeloo" and "leeloo" would be two partitions that read as one.
+        // "Bellows" and "bellows" would be two partitions that read as one.
         for (const id of [
-            'Leeloo AI',
-            'LEELOO',
-            'Leeloo',
-            'leeloo/front',
-            'leeloo.ai',
-            '-leeloo',
-            '_leeloo',
+            'Bellows AI',
+            'BELLOWS',
+            'Bellows',
+            'bellows/front',
+            'bellows.ai',
+            '-bellows',
+            '_bellows',
             'a'.repeat(40),
         ]) {
             expect(() => loadConfig(env({ ORG_ID: id })), id).toThrow(/ORG_ID must be/);
@@ -55,7 +55,7 @@ describe('the organization', () => {
     });
 
     it('accepts the ids it should', () => {
-        for (const id of ['leeloo', 'a', 'leeloo-ai', 'leeloo_ai', '9to5', 'a'.repeat(39)]) {
+        for (const id of ['bellows', 'a', 'bellows-ai', 'bellows_ai', '9to5', 'a'.repeat(39)]) {
             expect(loadConfig(env({ ORG_ID: id })).orgId, id).toBe(id);
         }
     });

@@ -54,6 +54,15 @@ beforeEach(async () => {
     await sql`truncate job`;
 });
 
+/**
+ * Queues an unattributed job — the state every job written before accounts existed is in.
+ *
+ * `created_by` is a required parameter rather than an optional one, so that the route has to name
+ * the authenticated caller rather than defaulting quietly; these cases are about leases, not
+ * attribution, so they pass null explicitly. The attribution cases below pass a real account.
+ */
+const queue = (command: string) => store.create(command, null);
+
 /** Ages a lease into the past. Deterministic where sleeping for a one-second lease is not. */
 const expireLease = (id: string) =>
     sql`update job set lease_expires_at = now() - interval '1 second' where id = ${id}`;
@@ -65,7 +74,7 @@ const row = (id: string) =>
 
 describe.skipIf(!enabled)('job store', () => {
     it('queues a job and reads it back', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
 
         const job = await store.get(id);
         expect(job).toMatchObject({ command: 'echo hi', status: 'queued', attempts: 0, maxAttempts: 3 });
@@ -73,7 +82,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('hands a job to one claimer and holds it there while the lease is live', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
 
         const first = await store.claim('w1', 300);
         expect(first).toMatchObject({ id, command: 'echo hi', attempts: 1 });
@@ -83,15 +92,15 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('takes the oldest job first', async () => {
-        const { id: first } = await store.create('first');
-        const { id: second } = await store.create('second');
+        const { id: first } = await queue('first');
+        const { id: second } = await queue('second');
 
         expect((await store.claim('w1', 300))?.id).toBe(first);
         expect((await store.claim('w2', 300))?.id).toBe(second);
     });
 
     it('reclaims an expired lease with a fresh token and a bumped attempt', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const first = await store.claim('w1', 300);
         const firstStart = (await row(id))[0]?.started_at as Date;
         await expireLease(id);
@@ -109,7 +118,7 @@ describe.skipIf(!enabled)('job store', () => {
     // Without this a command that kills its worker is handed out again every time its lease
     // expires, forever, and one poison job permanently occupies a worker slot.
     it('gives up on a job that has burned its attempts', async () => {
-        const { id } = await store.create('kill -9 $$');
+        const { id } = await queue('kill -9 $$');
         await sql`update job set max_attempts = 1 where id = ${id}`;
         await store.claim('w1', 300);
         await expireLease(id);
@@ -119,7 +128,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('extends a live lease on a heartbeat', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const claim = await store.claim('w1', 60);
 
         const beat = await store.heartbeat(id, claim!.leaseToken, 600);
@@ -129,7 +138,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('separates an unknown job from a lost lease', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const stale = await store.claim('w1', 300);
         await expireLease(id);
         await store.claim('w2', 300);
@@ -141,7 +150,7 @@ describe.skipIf(!enabled)('job store', () => {
     // The whole point of the fencing token: the two runs did different work, so the loser's report
     // is refused rather than merged.
     it('refuses a completion from a worker whose lease was reclaimed', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const stale = await store.claim('w1', 300);
         await expireLease(id);
         const winner = await store.claim('w2', 300);
@@ -176,7 +185,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('records the session an attempt is running as', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const claim = await store.claim('w1', 300);
 
         expect(await store.session(id, claim!.leaseToken, SESSION, null)).toBe('ok');
@@ -187,7 +196,7 @@ describe.skipIf(!enabled)('job store', () => {
     // second must not be able to wipe the first, and the first must not wipe a remote id that a
     // later report already stored.
     it('adds the remote session id without clearing what is already there', async () => {
-        const { id } = await store.create('drive me');
+        const { id } = await queue('drive me');
         const claim = await store.claim('w1', 300);
 
         await store.session(id, claim!.leaseToken, SESSION, null);
@@ -198,7 +207,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('drops the remote session when the job is claimed again', async () => {
-        const { id } = await store.create('drive me');
+        const { id } = await queue('drive me');
         const first = await store.claim('w1', 300);
         await store.session(id, first!.leaseToken, SESSION, REMOTE);
         await expireLease(id);
@@ -209,7 +218,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('refuses a session report from a worker whose lease was reclaimed', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const stale = await store.claim('w1', 300);
         await expireLease(id);
         await store.claim('w2', 300);
@@ -221,7 +230,7 @@ describe.skipIf(!enabled)('job store', () => {
     // The attempt that died ran a different session, and showing its link next to this attempt's
     // output would point a reader at work that was thrown away.
     it('clears the session when the job is claimed again', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const first = await store.claim('w1', 300);
         await store.session(id, first!.leaseToken, SESSION, null);
         await expireLease(id);
@@ -232,7 +241,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('parks a running job without finishing it, keeping its session', async () => {
-        const { id } = await store.create('drive me');
+        const { id } = await queue('drive me');
         const claim = await store.claim('w1', 300);
         await store.session(id, claim!.leaseToken, SESSION, null);
 
@@ -245,7 +254,7 @@ describe.skipIf(!enabled)('job store', () => {
     // A parked job must not be picked up by the next idle poll — that would resume it instantly,
     // which is the opposite of parking it. The partial claim index is what makes this true.
     it('does not hand out a parked job', async () => {
-        const { id } = await store.create('drive me');
+        const { id } = await queue('drive me');
         const claim = await store.claim('w1', 300);
         await store.suspend(id, claim!.leaseToken);
 
@@ -254,7 +263,7 @@ describe.skipIf(!enabled)('job store', () => {
 
     // Parking is not a failed try. Without the give-back, a job parked three times is dead.
     it('hands back the attempt it took, so parking is not a retry', async () => {
-        const { id } = await store.create('drive me');
+        const { id } = await queue('drive me');
 
         for (let i = 0; i < 5; i += 1) {
             const claim = await store.claim(`w${i}`, 300);
@@ -270,7 +279,7 @@ describe.skipIf(!enabled)('job store', () => {
     // The whole point of standby: the claim carries the parked session back to the worker, which
     // restores it instead of starting a new one — so the link the UI shows does not move.
     it('hands the parked session back on the claim that resumes it', async () => {
-        const { id } = await store.create('drive me');
+        const { id } = await queue('drive me');
         const first = await store.claim('w1', 300);
         await store.session(id, first!.leaseToken, SESSION, REMOTE);
         await store.suspend(id, first!.leaseToken);
@@ -286,7 +295,7 @@ describe.skipIf(!enabled)('job store', () => {
     // A lease that expired mid-run is not a park: that attempt's session is not this one, and
     // resuming it would replay a transcript whose output was thrown away.
     it('does not offer a session to resume when it is reclaiming a crashed attempt', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const first = await store.claim('w1', 300);
         await store.session(id, first!.leaseToken, SESSION, null);
         await expireLease(id);
@@ -297,7 +306,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('refuses to park a job on a lease that has moved on', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const stale = await store.claim('w1', 300);
         await expireLease(id);
         await store.claim('w2', 300);
@@ -307,14 +316,14 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('separates a job that is not parked from one that does not exist', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
 
         expect(await store.resume(id)).toBe('conflict');
         expect(await store.resume(ABSENT)).toBe('missing');
     });
 
     it('leaves output out of the list projection', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
         const claim = await store.claim('w1', 300);
         await store.complete(id, claim!.leaseToken, { status: 'succeeded', exitCode: 0, output: 'noise' });
 
@@ -324,8 +333,8 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('filters the list by status', async () => {
-        await store.create('one');
-        const { id } = await store.create('two');
+        await queue('one');
+        const { id } = await queue('two');
         await store.claim('w1', 300);
 
         expect(await store.list({ status: 'running', limit: 10 })).toHaveLength(1);
@@ -333,7 +342,7 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('keeps one organization out of another organization queue', async () => {
-        const { id } = await store.create('echo hi');
+        const { id } = await queue('echo hi');
 
         expect(await otherOrgStore.claim('intruder', 300)).toBeNull();
         expect(await otherOrgStore.get(id)).toBeNull();
@@ -344,7 +353,7 @@ describe.skipIf(!enabled)('job store', () => {
     // limit, so a contended row is counted and then discarded rather than skipped.
     it('never hands the same job to two claimers', async () => {
         const ids = new Set<string>();
-        for (let i = 0; i < 50; i += 1) ids.add((await store.create(`job ${i}`)).id);
+        for (let i = 0; i < 50; i += 1) ids.add((await queue(`job ${i}`)).id);
 
         const claims = await Promise.all(
             Array.from({ length: 50 }, (_, i) => store.claim(`w${i}`, 300)),
@@ -355,8 +364,8 @@ describe.skipIf(!enabled)('job store', () => {
     });
 
     it('skips a locked row rather than waiting on it', async () => {
-        const { id: pinned } = await store.create('first');
-        const { id: next } = await store.create('second');
+        const { id: pinned } = await queue('first');
+        const { id: next } = await queue('second');
 
         await sql.begin(async (tx) => {
             await tx`select id from job where id = ${pinned} for update`;
@@ -364,5 +373,57 @@ describe.skipIf(!enabled)('job store', () => {
             // fail — which is itself the signal.
             expect((await store.claim('w1', 300))?.id).toBe(next);
         });
+    });
+});
+
+describe.runIf(enabled)('attribution', () => {
+    /**
+     * A real account for created_by to point at. Written directly rather than through the auth
+     * store: this file is about the job table, and going through a sign-in would make these cases
+     * fail for reasons that have nothing to do with them.
+     */
+    const account = async (githubUserId: number, login: string): Promise<string> => {
+        const [row] = await sql<{ id: string }[]>`
+            insert into app_user (github_user_id, github_login) values (${githubUserId}, ${login})
+            on conflict (github_user_id) do update set github_login = excluded.github_login
+            returning id
+        `;
+        return row!.id;
+    };
+
+    it('records who queued a job and reports it back on read', async () => {
+        const userId = await account(5001, 'octocat');
+
+        const { id } = await store.create('echo hi', userId);
+
+        expect((await store.get(id))?.createdBy).toBe(userId);
+    });
+
+    it('reports the author to the worker that claims it', async () => {
+        // The seam the per-user credential work reads. It has no other consumer yet, which is
+        // exactly why it needs a test now rather than later.
+        const userId = await account(5002, 'octodog');
+        await store.create('echo hi', userId);
+
+        expect((await store.claim('driver-1', 300))?.userId).toBe(userId);
+    });
+
+    it('claims an unattributed job with a null author rather than refusing it', async () => {
+        // Every job written before this migration is in this state, and they must still run.
+        await queue('echo hi');
+        expect((await store.claim('driver-1', 300))?.userId).toBeNull();
+    });
+
+    it('keeps the job when the account that queued it is deleted', async () => {
+        // `on delete set null`, never cascade: removing a person must not erase the record of what
+        // they ran, on the one route that runs shell commands.
+        const userId = await account(5003, 'departing');
+        const { id } = await store.create('echo hi', userId);
+
+        await sql`delete from app_user where id = ${userId}`;
+
+        const job = await store.get(id);
+        expect(job).not.toBeNull();
+        expect(job?.createdBy).toBeNull();
     });
 });

@@ -13,7 +13,11 @@ if (missing.length === config.passEnv.length) {
     console.warn(`[driver] none of ${config.passEnv.join(', ')} are set; runners will have no credential`);
 }
 
-const board = createBoard({ url: config.boardUrl, leaseSeconds: config.leaseSeconds });
+const board = createBoard({
+    url: config.boardUrl,
+    leaseSeconds: config.leaseSeconds,
+    token: config.boardToken,
+});
 const runner = createDockerRunner(config);
 const loop = createLoop({ board, runner, config, log: (m) => console.log(`[driver] ${m}`) });
 

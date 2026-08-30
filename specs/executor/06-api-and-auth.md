@@ -112,10 +112,10 @@ real prompt, far below anything usable to pressure the process. `415` on a non-J
 
 ```jsonc
 {
-  "repo": "Leeloo-AI-RGA-OS/leeloo.ai",       // required, must be in organization.repos
+  "repo": "Bellows-AI/bellows.ai",       // required, must be in organization.repos
   "baseBranch": "dev",                         // optional, defaults to config.baseBranch
   "tool": "claude-code",                       // optional, defaults to executor.default_tool
-  "invocation": { "kind": "command", "name": "leeloo-frontend-fix", "args": "LEEL-1234" },
+  "invocation": { "kind": "command", "name": "bellows-frontend-fix", "args": "LEEL-1234" },
   "prompt": "",                                // required when kind === 'prompt'
   "permissionMode": "acceptEdits",             // optional
   "mcpServers": ["jira"],                      // optional, names resolved against executor config

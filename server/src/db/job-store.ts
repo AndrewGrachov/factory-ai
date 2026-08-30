@@ -11,6 +11,14 @@ export interface Job {
     attempts: number;
     maxAttempts: number;
     claimedBy: string | null;
+    /**
+     * The account that queued this job, or null for one queued before accounts existed.
+     *
+     * This is the audit trail on a route that runs shell commands, and it is also the seam the
+     * per-user Claude credential and per-user workspace work reads: a claim reports it so the driver
+     * can resolve them without ever touching the database.
+     */
+    createdBy: string | null;
     /** The agent session this attempt runs as, once its driver has reported it. */
     sessionId: string | null;
     /**
@@ -33,6 +41,14 @@ export interface Claim {
     leaseToken: string;
     leaseExpiresAt: string;
     /**
+     * Who queued the job, so a worker can run it as them. Null for an unattributed job.
+     *
+     * Reported now, before anything consumes it: the driver resolves a per-user credential and
+     * workspace from this, and shipping the field ahead of its consumer means that work is a change
+     * to the driver alone rather than a change to the protocol as well.
+     */
+    userId: string | null;
+    /**
      * Set only when this claim is picking a parked job back up, and it is the whole resume protocol:
      * the worker restores that session instead of starting a new one, and the command is not
      * re-delivered — it was delivered on the first run and is in the transcript.
@@ -50,7 +66,12 @@ export interface Claim {
 export type LeaseResult = 'ok' | 'lost' | 'missing';
 
 export interface JobStore {
-    create(command: string): Promise<{ id: string }>;
+    /**
+     * `createdBy` is a parameter rather than something read off the body, and the route passes the
+     * authenticated caller's id. A client-supplied one would be impersonation on the audit trail of
+     * a route that runs shell commands.
+     */
+    create(command: string, createdBy: string | null): Promise<{ id: string }>;
     /** The oldest claimable job, or null when there is none. Never blocks on a live lease. */
     claim(worker: string, leaseSeconds: number): Promise<Claim | null>;
     heartbeat(id: string, leaseToken: string, leaseSeconds: number): Promise<{ result: LeaseResult; leaseExpiresAt: string | null }>;
@@ -95,6 +116,7 @@ interface JobRow {
     attempts: number;
     max_attempts: number;
     claimed_by: string | null;
+    created_by: string | null;
     session_id: string | null;
     remote_session_id: string | null;
     exit_code: number | null;
@@ -113,6 +135,7 @@ const toJob = (row: JobRow): Job => ({
     attempts: row.attempts,
     maxAttempts: row.max_attempts,
     claimedBy: row.claimed_by,
+    createdBy: row.created_by,
     sessionId: row.session_id,
     remoteSessionId: row.remote_session_id,
     exitCode: row.exit_code,
@@ -137,10 +160,11 @@ export function createJobStore({
     };
 
     return {
-        async create(command) {
+        async create(command, createdBy) {
             await gate();
             const rows = await sql<{ id: string }[]>`
-                insert into job (org_id, command) values (${orgId}, ${command})
+                insert into job (org_id, command, created_by)
+                values (${orgId}, ${command}, ${createdBy})
                 returning id
             `;
             return { id: rows[0]!.id };
@@ -164,6 +188,7 @@ export function createJobStore({
                     attempts: number;
                     lease_token: string;
                     lease_expires_at: Date;
+                    created_by: string | null;
                     session_id: string | null;
                 }[]
             >`
@@ -197,7 +222,7 @@ export function createJobStore({
                     -- because this subquery is holding the row lock.
                     for update skip locked
                 )
-                returning id, command, attempts, lease_token, lease_expires_at, session_id
+                returning id, command, attempts, lease_token, lease_expires_at, created_by, session_id
             `;
 
             const row = rows[0];
@@ -208,6 +233,7 @@ export function createJobStore({
                 attempts: row.attempts,
                 leaseToken: row.lease_token,
                 leaseExpiresAt: row.lease_expires_at.toISOString(),
+                userId: row.created_by,
                 // Survived the case above, so this claim is a resume.
                 resumeSessionId: row.session_id,
             };
@@ -301,8 +327,9 @@ export function createJobStore({
         async get(id) {
             await gate();
             const rows = await sql<JobRow[]>`
-                select id, command, status, attempts, max_attempts, claimed_by, session_id,
-                       remote_session_id, exit_code, output, created_at, started_at, finished_at
+                select id, command, status, attempts, max_attempts, claimed_by, created_by,
+                       session_id, remote_session_id, exit_code, output, created_at, started_at,
+                       finished_at
                 from job where org_id = ${orgId} and id = ${id}
             `;
             const row = rows[0];
@@ -312,8 +339,8 @@ export function createJobStore({
         async list({ status, limit }) {
             await gate();
             const rows = await sql<JobRow[]>`
-                select id, command, status, attempts, max_attempts, claimed_by, session_id,
-                       remote_session_id, exit_code, created_at, started_at, finished_at
+                select id, command, status, attempts, max_attempts, claimed_by, created_by,
+                       session_id, remote_session_id, exit_code, created_at, started_at, finished_at
                 from job
                 where org_id = ${orgId} ${status ? sql`and status = ${status}` : sql``}
                 order by created_at desc, id

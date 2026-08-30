@@ -10,6 +10,14 @@ export interface BoardJob {
      * Absent on a board that predates standby, which is why it is read as `?? null`.
      */
     resumeSessionId: string | null;
+    /**
+     * The account that queued the job, or null for an unattributed one.
+     *
+     * Nothing here reads it yet: it is carried so the per-user Claude credential and per-user
+     * workspace work is a change to this process alone rather than to the protocol as well. Read
+     * defensively, like `resumeSessionId`, because a board that predates the field omits it.
+     */
+    userId: string | null;
 }
 
 /** Whether the board still recognises this worker as the holder of the job. */
@@ -38,16 +46,32 @@ type Fetch = typeof globalThis.fetch;
 export function createBoard({
     url,
     leaseSeconds,
+    token,
     fetch = globalThis.fetch,
 }: {
     url: string;
     leaseSeconds: number;
+    /**
+     * The worker token, when the board requires one. Empty against a board with AUTH_MODE=none.
+     *
+     * This is the driver's entire share of authentication: one header. It stays that way on purpose
+     * — this process depends on nothing, `core` included, because it is a client of an HTTP board
+     * and giving it the server's types would hand a process that needs only `fetch` and `docker` the
+     * whole server dependency tree.
+     */
+    token?: string | undefined;
     fetch?: Fetch;
 }): Board {
     const post = async (path: string, body: unknown): Promise<Response> => {
         const response = await fetch(`${url}${path}`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: {
+                'content-type': 'application/json',
+                // Omitted rather than sent empty: a board with no auth would otherwise see a Bearer
+                // header with nothing in it, which is a credential that failed rather than one that
+                // was never offered.
+                ...(token ? { authorization: `Bearer ${token}` } : {}),
+            },
             body: JSON.stringify(body),
         });
         // 409 is a verdict, not a failure; everything else outside 2xx is the board being broken or
@@ -63,7 +87,11 @@ export function createBoard({
             const response = await post('/api/jobs/claim', { worker, leaseSeconds });
             if (response.status === 204) return null;
             const claimed = (await response.json()) as Partial<BoardJob>;
-            return { ...(claimed as BoardJob), resumeSessionId: claimed.resumeSessionId ?? null };
+            return {
+                ...(claimed as BoardJob),
+                resumeSessionId: claimed.resumeSessionId ?? null,
+                userId: claimed.userId ?? null,
+            };
         },
 
         async heartbeat(job) {

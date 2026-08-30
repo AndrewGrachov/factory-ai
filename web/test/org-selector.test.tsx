@@ -7,15 +7,15 @@ import type { StatsPayload } from '../src/api/useStats.js';
 
 const CONFIG: OrganizationMeta = {
     mode: 'config',
-    current: { id: 'leeloo', name: 'Leeloo AI' },
-    available: [{ id: 'leeloo', name: 'Leeloo AI' }],
+    current: { id: 'bellows', name: 'Bellows AI' },
+    available: [{ id: 'bellows', name: 'Bellows AI' }],
 };
 
 const DIRECTORY: OrganizationMeta = {
     mode: 'directory',
-    current: { id: 'leeloo', name: 'Leeloo AI' },
+    current: { id: 'bellows', name: 'Bellows AI' },
     available: [
-        { id: 'leeloo', name: 'Leeloo AI' },
+        { id: 'bellows', name: 'Bellows AI' },
         { id: 'acme', name: 'Acme Inc' },
     ],
 };
@@ -28,7 +28,7 @@ describe('OrgSelector', () => {
         const html = render(CONFIG);
         expect(html).toContain('<select');
         expect(html).toContain('disabled=""');
-        expect(html).toContain('Leeloo AI');
+        expect(html).toContain('Bellows AI');
         expect(html.match(/<option/g)).toHaveLength(1);
     });
 
@@ -66,7 +66,7 @@ describe('TopBar', () => {
             stale: false,
             source: 'live',
             organization: CONFIG,
-            repos: [{ owner: 'Leeloo-AI-RGA-OS', name: 'leeloo.ai' }],
+            repos: [{ owner: 'Bellows-AI', name: 'bellows.ai' }],
             baseBranch: 'dev',
         },
     } as unknown as StatsPayload;
@@ -83,7 +83,7 @@ describe('TopBar', () => {
     it('keeps naming the repos rather than letting the organization name stand in for them', () => {
         // The figures below are only interpretable if you know what went into them, and an
         // organization name does not tell you that. Stops a later "the org name says it all".
-        expect(html()).toContain('leeloo.ai');
+        expect(html()).toContain('bellows.ai');
     });
 
     it('renders nothing before the first payload rather than an empty control', () => {

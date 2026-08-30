@@ -23,7 +23,7 @@
 --
 -- WHY '__unclaimed__' AND NOT THE CONFIGURED ID: this file cannot see the config, and guessing
 -- wrong is silent. Backfilling the literal 'default' would leave a deployment that sets
--- ORG_ID=leeloo pointed at an empty partition: 200 OK, zero PRs, no log line, indistinguishable
+-- ORG_ID=bellows pointed at an empty partition: 200 OK, zero PRs, no log line, indistinguishable
 -- from data loss. Instead every pre-organization row is parked in a reserved namespace and adopted
 -- into the configured org exactly once, by adoptOrg() in db/migrate.ts. config.ts refuses any id
 -- beginning with '__' so the namespace cannot be squatted.

@@ -28,9 +28,21 @@ function write(contents: string, name = 'factory.toml'): string {
  */
 const DB = 'postgres://factory:factory@127.0.0.1:5432/factory_dev';
 
+/**
+ * Same reasoning, for the same reason: two cases here set `host = "0.0.0.0"` to exercise the file
+ * layer, and AUTH_MODE defaults to `none`, which refuses a bind reachable from off the machine. The
+ * hatch is how that combination is expressed, so it is a baseline rather than a surprise in the two
+ * cases that are about something else entirely. A case that IS about the refusal overrides it.
+ */
+const ALLOW_PUBLIC = '1';
+
 function resolve(toml: string | null, env: NodeJS.ProcessEnv = {}) {
     if (toml !== null) write(toml);
-    return resolveConfig({ env: { DATABASE_URL: DB, ...env }, cwd: dir, warn });
+    return resolveConfig({
+        env: { DATABASE_URL: DB, AUTH_ALLOW_PUBLIC_BIND: ALLOW_PUBLIC, ...env },
+        cwd: dir,
+        warn,
+    });
 }
 
 beforeEach(() => {
@@ -115,15 +127,15 @@ ttl_seconds = 45
     });
 
     it('accepts an [organization] table and defaults the id', () => {
-        const { config } = resolve('[organization]\nname = "Leeloo AI"\n');
+        const { config } = resolve('[organization]\nname = "Bellows AI"\n');
         expect(config.orgId).toBe('default');
-        expect(config.orgName).toBe('Leeloo AI');
+        expect(config.orgName).toBe('Bellows AI');
     });
 
     it('names the TOML key when the organization id is illegal', () => {
         // Pins explain()'s provenance rewriting for the new keys — the only non-mechanical part of
         // the file layer's half of this change.
-        expect(() => resolve('[organization]\nid = "Leeloo AI"\n')).toThrow(
+        expect(() => resolve('[organization]\nid = "Bellows AI"\n')).toThrow(
             /ORG_ID must be[\s\S]*organization\.id/,
         );
     });

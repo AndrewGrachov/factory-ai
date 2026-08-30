@@ -41,7 +41,7 @@ record, so env wins by merge order.
   but the org id leads every stored primary key — a literal default would clobber the file's
   `organization.id` on every start and repartition the database under the operator. `ORG_REPOS`
   follows suit, one step less severe. This also fixes the pre-existing case where
-  `GITHUB_REPOS: ${GITHUB_REPOS:-leeloo.ai}` silently overrode a mounted file's repo list.
+  `GITHUB_REPOS: ${GITHUB_REPOS:-bellows.ai}` silently overrode a mounted file's repo list.
 - **A missing `FACTORY_CONFIG` path is fatal; a missing default path is silent.** One is an
   explicit request that could not be honoured, the other is the supported env-only mode that the
   test suite and CI run in.
@@ -54,7 +54,25 @@ record, so env wins by merge order.
   would silently ignore the file's token while the config believed it had one.
 - **Integers must be unquoted and strings must be strings** (`ttl_seconds = "900"` is rejected),
   so the file stays honestly typed instead of drifting into env-style stringly values. A `bots`
-  entry containing a comma is rejected because the env form is comma-separated.
+  entry containing a comma is rejected because the env form is comma-separated. **Booleans follow
+  the same rule**: `cookie_secure = "true"` is rejected, while the env layer still takes `1`/`true`,
+  because there every value is a string and there is nothing to distinguish.
+- **`AUTH_MODE` is an explicit enum, never inferred from whether a client id is set**, and
+  `AUTH_MODE=github` with an incomplete `[auth]` is fatal and names the missing key. Both are the
+  same instinct as `persistence.status` having no `'off'`: a mode you can fall into by typo is worse
+  than one that refuses. Full reasoning in [auth.md](auth.md). `AuthConfig` is a discriminated union
+  rather than a record of optionals, so "half-configured" is unrepresentable rather than merely
+  rejected.
+- **Three `[auth]` settings are environment-only and deliberately absent from `KEYS`.**
+  `GITHUB_OAUTH_AUTHORIZE_URL` / `_TOKEN_URL` / `_USER_URL` are a test seam — a configurable
+  authorize URL in a file that ships with a deployment is a phishing vector, and `index.ts` logs
+  loudly when one is in use. `AUTH_ALLOW_PUBLIC_BIND` is env-only for a different reason: it asserts
+  something about the network in front of the process, which is a property of the host rather than of
+  the deployment.
+- **The group/world-readable warning covers every secret**, not just `GITHUB_TOKEN`: a `factory.toml`
+  holding only a `session_secret` is exactly as bad, and keying the check on one name would have left
+  it silent. It stays conditioned on the file actually carrying one, because the committed e2e config
+  declares none and is necessarily mode 644.
 - **`ORG_WORKSPACE_ROOT` is unset by default, must be absolute, and expands `~` against `env.HOME`
   rather than `os.homedir()`** — that last one is what keeps `loadConfig` a pure function of its
   argument. See [workspace.md](workspace.md) for the rest, including why a relative path is rejected

@@ -5,7 +5,7 @@ import { type AppConfig, loadConfig } from './config.js';
 
 export const CONFIG_FILENAME = 'factory.toml';
 
-type Kind = 'string' | 'int' | 'list';
+type Kind = 'string' | 'int' | 'list' | 'bool';
 
 /**
  * TOML path -> env key. `github.source` maps to DATA_SOURCE rather than GITHUB_SOURCE so it
@@ -28,7 +28,24 @@ const KEYS: Record<string, { readonly env: string; readonly kind: Kind }> = {
     'telemetry.source': { env: 'TELEMETRY_SOURCE', kind: 'string' },
     'telemetry.database_url': { env: 'DATABASE_URL', kind: 'string' },
     'telemetry.ttl_seconds': { env: 'TELEMETRY_TTL_SECONDS', kind: 'int' },
+    // The three GitHub OAuth endpoint overrides are deliberately absent: they are a test seam, and
+    // a configurable authorize URL in a file that ships with a deployment is a phishing vector.
+    // AUTH_ALLOW_PUBLIC_BIND is absent for a related reason — it is an assertion about the network
+    // in front of the process, which is a property of the host rather than of the deployment.
+    'auth.mode': { env: 'AUTH_MODE', kind: 'string' },
+    'auth.github_client_id': { env: 'GITHUB_OAUTH_CLIENT_ID', kind: 'string' },
+    'auth.github_client_secret': { env: 'GITHUB_OAUTH_CLIENT_SECRET', kind: 'string' },
+    'auth.session_secret': { env: 'SESSION_SECRET', kind: 'string' },
+    'auth.session_ttl_hours': { env: 'SESSION_TTL_HOURS', kind: 'int' },
+    'auth.cookie_secure': { env: 'COOKIE_SECURE', kind: 'bool' },
+    'auth.public_url': { env: 'PUBLIC_URL', kind: 'string' },
+    'auth.bootstrap_admin': { env: 'AUTH_BOOTSTRAP_ADMIN', kind: 'string' },
+    'auth.auto_join_github_org': { env: 'AUTH_AUTO_JOIN_GITHUB_ORG', kind: 'string' },
+    'auth.ingest_token': { env: 'INGEST_TOKEN', kind: 'string' },
 };
+
+/** Every env key whose value is a secret, so one list decides what the mode warning covers. */
+const SECRET_KEYS = ['GITHUB_TOKEN', 'GITHUB_OAUTH_CLIENT_SECRET', 'SESSION_SECRET', 'INGEST_TOKEN'];
 
 const SECTIONS = [...new Set(Object.keys(KEYS).map((path) => path.split('.')[0]))];
 
@@ -143,6 +160,15 @@ function flatten(parsed: Record<string, unknown>, path: string): FileConfig {
                     throw new Error(`${path}: ${tomlPath} must be an integer, not ${describe(value)}`);
                 }
                 values[spec.env] = String(value);
+            } else if (spec.kind === 'bool') {
+                // `cookie_secure = "true"` is rejected rather than accepted, for the same reason a
+                // quoted integer is: the file stays honestly typed instead of drifting into
+                // env-style stringly values. The env layer still takes "1"/"true", because there
+                // every value is a string and there is nothing to distinguish.
+                if (typeof value !== 'boolean') {
+                    throw new Error(`${path}: ${tomlPath} must be true or false, not ${describe(value)}`);
+                }
+                values[spec.env] = value ? '1' : '0';
             } else {
                 if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
                     throw new Error(`${path}: ${tomlPath} must be an array of strings, not ${describe(value)}`);
@@ -216,12 +242,16 @@ export function readConfigFile(options: ReadOptions = {}): FileConfig | null {
     const config = flatten(parsed as Record<string, unknown>, found.path);
 
     // Warned rather than thrown: refusing to boot over a permission bit would be worse than the
-    // risk it flags. Conditioned on the file actually carrying a token, because the committed
+    // risk it flags. Conditioned on the file actually carrying a secret, because the committed
     // e2e config declares none and is necessarily mode 644 — and a warning that fires on a file
     // with no secret in it is how people learn to ignore the ones that matter.
-    if (permissive && config.values.GITHUB_TOKEN) {
+    //
+    // Every secret, not just the PAT: a file holding only a session secret is exactly as bad, and
+    // keying the warning on one name would have left it silent.
+    const secrets = SECRET_KEYS.filter((key) => config.values[key]);
+    if (permissive && secrets.length) {
         warn(
-            `[config] ${found.path} is readable by other users (mode ${(stat.mode & 0o777).toString(8)}) and holds a GitHub token — chmod 600 it`,
+            `[config] ${found.path} is readable by other users (mode ${(stat.mode & 0o777).toString(8)}) and holds ${secrets.join(', ')} — chmod 600 it`,
         );
     }
 

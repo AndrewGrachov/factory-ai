@@ -5,6 +5,28 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 const PORT = 8123;
 
 /**
+ * The auth check runs on its own server, on its own port, against its own database.
+ *
+ * Not folded into the one above: dashboard.spec.ts is the visual regression check and every one of
+ * its assertions predates accounts, so putting a login wall in front of it would mean editing all
+ * of them for a change that is not about the dashboard. Two servers is cheaper than that, and it
+ * also keeps a boot with AUTH_MODE=none under test, which is the mode `npm run seed`, the route
+ * harness and scripts/test-jobs.sh all depend on.
+ */
+const AUTH_PORT = 8124;
+const IDP_PORT = 8125;
+const E2E_LOGIN = 'e2e-user';
+
+const shared = {
+    WEB_ROOT: `${root}web/dist`,
+    TELEMETRY_SOURCE: 'postgres',
+    // Pinned, because cwd is the repo root and a developer's gitignored factory.toml is discovered
+    // from there. See the note in e2e/factory.e2e.toml for why absence of a token has to come from
+    // the file layer rather than from an empty environment variable.
+    FACTORY_CONFIG: `${root}e2e/factory.e2e.toml`,
+};
+
+/**
  * The built SPA is served by the API rather than by Vite, so the suite exercises the same
  * single-origin arrangement as production and needs no proxy rule.
  *
@@ -28,37 +50,86 @@ export default defineConfig({
         screenshot: 'off',
         trace: 'retain-on-failure',
     },
-    projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-    webServer: {
-        // Seeded first, and every run: the assertions read the numbers the generator produces, and
-        // a stale database from an older generator would fail in a way that looks like a UI bug.
-        command: 'npm run build && npm run seed && node server/dist/index.js',
-        // /api/health never touches GitHub or the database, so it reports ready immediately —
-        // the cold fixture fetch is awaited in the spec instead.
-        url: `http://127.0.0.1:${PORT}/api/health`,
-        cwd: root,
-        env: {
-            PORT: String(PORT),
-            WEB_ROOT: `${root}web/dist`,
-            DATABASE_URL: 'postgres://factory:factory@127.0.0.1:5432/factory_e2e',
-            TELEMETRY_SOURCE: 'postgres',
-            // Pinned, because cwd is the repo root and a developer's gitignored factory.toml is
-            // discovered from there. Environment wins over the file, so both the organization
-            // assertion and the database the run seeds are deterministic whether or not that file
-            // exists — and in particular a personal factory.toml cannot point this at factory_dev.
-            ORG_ID: 'e2e-org',
-            ORG_NAME: 'E2E Org',
-            // Pins the config file, which is the only way to guarantee no token is in scope: an
-            // EMPTY environment variable is not an override, so `GITHUB_TOKEN: ''` here would NOT
-            // clear one set in a developer's personal factory.toml — and with a token this run
-            // would fetch from GitHub and then refuse to boot against a disposable database.
-            FACTORY_CONFIG: `${root}e2e/factory.e2e.toml`,
+    projects: [
+        {
+            name: 'chromium',
+            testIgnore: /auth\.spec\.ts/,
+            use: { ...devices['Desktop Chrome'] },
         },
-        timeout: 180_000,
-        // Never reuse: a server left over from a previous edit would verify stale code, which
-        // is the one failure mode a visual check exists to catch.
-        reuseExistingServer: false,
-        stdout: 'ignore',
-        stderr: 'pipe',
-    },
+        {
+            name: 'auth',
+            testMatch: /auth\.spec\.ts/,
+            use: { ...devices['Desktop Chrome'], baseURL: `http://127.0.0.1:${AUTH_PORT}` },
+        },
+    ],
+    webServer: [
+        {
+            // Seeded first, and every run: the assertions read the numbers the generator produces,
+            // and a stale database from an older generator would fail in a way that looks like a UI
+            // bug.
+            command: 'npm run build && npm run seed && node server/dist/index.js',
+            // /api/health never touches GitHub or the database, so it reports ready immediately —
+            // the cold fixture fetch is awaited in the spec instead.
+            url: `http://127.0.0.1:${PORT}/api/health`,
+            cwd: root,
+            env: {
+                ...shared,
+                PORT: String(PORT),
+                DATABASE_URL: 'postgres://factory:factory@127.0.0.1:5432/factory_e2e',
+                // Environment wins over the file, so both the organization assertion and the
+                // database the run seeds are deterministic whether or not a personal factory.toml
+                // exists — and in particular that file cannot point this at factory_dev.
+                ORG_ID: 'e2e-org',
+                ORG_NAME: 'E2E Org',
+            },
+            timeout: 180_000,
+            // Never reuse: a server left over from a previous edit would verify stale code, which
+            // is the one failure mode a visual check exists to catch.
+            reuseExistingServer: false,
+            stdout: 'ignore',
+            stderr: 'pipe',
+        },
+        {
+            command: 'node e2e/stub-idp.mjs',
+            url: `http://127.0.0.1:${IDP_PORT}/user`,
+            cwd: root,
+            env: { STUB_IDP_PORT: String(IDP_PORT), STUB_IDP_LOGIN: E2E_LOGIN },
+            reuseExistingServer: false,
+            stdout: 'ignore',
+            stderr: 'pipe',
+        },
+        {
+            // A separate database from the one above, so the invite this seeds cannot change what
+            // the visual check renders.
+            command: 'npm run build && npm run seed && node server/dist/index.js',
+            url: `http://127.0.0.1:${AUTH_PORT}/api/health`,
+            cwd: root,
+            env: {
+                ...shared,
+                PORT: String(AUTH_PORT),
+                DATABASE_URL: 'postgres://factory:factory@127.0.0.1:5432/factory_auth_e2e',
+                ORG_ID: 'auth-e2e-org',
+                ORG_NAME: 'Auth E2E Org',
+                AUTH_MODE: 'github',
+                GITHUB_OAUTH_CLIENT_ID: 'stub-client-id',
+                GITHUB_OAUTH_CLIENT_SECRET: 'stub-client-secret',
+                SESSION_SECRET: 'an-e2e-session-secret-of-at-least-32-chars',
+                PUBLIC_URL: `http://127.0.0.1:${AUTH_PORT}`,
+                // The three overrides that point the exchange at the stub. Environment only — they
+                // are deliberately absent from factory.toml's key set, and the server logs loudly
+                // when they are in use, because a configurable authorize URL reaching a real
+                // deployment would be a phishing vector.
+                GITHUB_OAUTH_AUTHORIZE_URL: `http://127.0.0.1:${IDP_PORT}/login/oauth/authorize`,
+                GITHUB_OAUTH_TOKEN_URL: `http://127.0.0.1:${IDP_PORT}/login/oauth/access_token`,
+                GITHUB_OAUTH_USER_URL: `http://127.0.0.1:${IDP_PORT}/user`,
+                // An UNCLAIMED invite. First sign-in binds it, which is the half of the flow most
+                // worth driving in a browser.
+                SEED_INVITE_LOGIN: E2E_LOGIN,
+            },
+            timeout: 180_000,
+            reuseExistingServer: false,
+            stdout: 'ignore',
+            stderr: 'pipe',
+        },
+    ],
 });

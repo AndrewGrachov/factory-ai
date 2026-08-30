@@ -12,10 +12,10 @@
 # where environment beats this file.
 
 [organization]
-repos = ["leeloo.ai"]
+repos = ["bellows.ai"]
 
 [github]
 # No `token` key at all. Without one the process never fetches, and the page renders purely from
 # the synthetic rows `npm run seed` wrote.
-owner = "Leeloo-AI-RGA-OS"
+owner = "Bellows-AI"
 base_branch = "dev"

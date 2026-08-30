@@ -22,7 +22,11 @@ try {
     // Imported sessions land in the configured organization, so a backfill run against the wrong
     // one is worth naming before it writes anything.
     console.log(`[org] importing into ${config.orgName} (${config.orgId})`);
-    await migrate(sql, { orgId: config.orgId, log: (m) => console.log(`[migrate] ${m}`) });
+    await migrate(sql, {
+        orgId: config.orgId,
+        orgName: config.orgName,
+        log: (m) => console.log(`[migrate] ${m}`),
+    });
     const summary = await backfillTranscripts(sql, {
         orgId: config.orgId,
         log: (m) => console.log(`[backfill] ${m}`),

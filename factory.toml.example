@@ -32,7 +32,7 @@ name = "Acme Inc"
 #
 # Cost scales: a full reconciliation is ~243 rate-limit points PER repo against a 5000/hour budget,
 # so the sync TTL floor below is multiplied by the number of repos listed.
-repos = ["leeloo.ai"]
+repos = ["web", "other-owner/some-service"]
 
 # Where this organization's checkouts live: one clone per repo above, at
 # `<workspace_root>/<id>/<repo name>`. Cloned at boot, in the background — nothing the dashboard
@@ -63,7 +63,7 @@ owner = "ExampleOwner"
 base_branch = "dev"
 
 # Reviewers listed here are classed as bots. An entry cannot contain a comma.
-bots = ["claude", "claude[bot]", "github-actions", "github-actions[bot]", "leeloo-frontend-fix-bot"]
+bots = ["claude", "claude[bot]", "github-actions", "github-actions[bot]", "bellows-frontend-fix-bot"]
 
 [server]
 port = 8080
@@ -89,3 +89,45 @@ database_url = "postgres://factory:factory@127.0.0.1:5432/factory_dev"
 
 # No quota to protect here, only a hot loop to prevent, so the floor is 5 rather than 60.
 ttl_seconds = 30
+
+[auth]
+# `none` (the default) leaves every route open and makes the bind address the access control, as it
+# always was. `github` requires a signed-in member. An EXPLICIT enum, never inferred from whether a
+# client id happens to be set: a mode reached by typo is the one failure nobody notices. Setting
+# `github` with any of the three keys below missing is fatal and names the missing one, rather than
+# quietly degrading to an open deployment. See docs/auth.md.
+mode = "none"
+
+# From an OAuth App (not a GitHub App), with the callback at <public_url>/api/auth/github/callback.
+# No scopes are requested — membership is Factory's, not GitHub's, so `read:org` buys nothing.
+# chmod 600 this file if you put a secret here; the boot warning about that is not decorative.
+github_client_id = ""
+github_client_secret = ""
+
+# At least 32 characters. Signs the session cookie, so rotating it logs everyone out.
+session_secret = ""
+
+# The absolute origin GitHub redirects back to. Defaults to http://<host>:<port> for a loopback
+# bind, required otherwise. Never derived from the request's Host header — that would let the
+# caller choose the redirect target.
+public_url = ""
+
+# Unquoted booleans, like unquoted integers: `cookie_secure = "true"` is rejected.
+cookie_secure = false
+
+# Fourteen days.
+session_ttl_hours = 336
+
+# A GitHub login made an admin at boot, and only when the organization has no members at all — the
+# one thing standing between turning auth on and locking everybody out. Afterwards use
+# `npm run invite`.
+bootstrap_admin = ""
+
+# Members of this GitHub organization admit themselves, as ordinary members, on first sign-in.
+# Empty keeps invite-only membership; invites keep working either way, which is how somebody
+# outside the org gets in. Costs the zero-scopes property — read:org is requested when it is set.
+auto_join_github_org = ""
+
+# Optional shared secret for the telemetry ingest routes (X-Factory-Ingest-Token). Unset leaves
+# them open, which is what the collector and the laptop plugin expect.
+ingest_token = ""

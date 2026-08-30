@@ -41,8 +41,8 @@ describe('the docker run arguments', () => {
     });
 
     it('mounts the checkouts volume and starts at the organization root', () => {
-        expect(args({ ORG_ID: 'leeloo' })).toEqual(
-            expect.arrayContaining(['-v', 'factory-ai_workspaces:/workspaces', 'WORKDIR=/workspaces/leeloo']),
+        expect(args({ ORG_ID: 'bellows' })).toEqual(
+            expect.arrayContaining(['-v', 'factory-ai_workspaces:/workspaces', 'WORKDIR=/workspaces/bellows']),
         );
     });
 

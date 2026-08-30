@@ -19,7 +19,7 @@ import { tokens } from '../src/format.js';
  * react-dom/server needs no DOM, so this stays in the default offline suite.
  */
 
-const REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
+const REPO = 'Bellows-AI/bellows.ai';
 
 const raw = JSON.parse(
     readFileSync(new URL('../../core/test/fixtures/sample-canonical.json', import.meta.url), 'utf8'),

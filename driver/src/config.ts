@@ -8,6 +8,15 @@
 export interface DriverConfig {
     /** Where the board is. The driver is a client of it, never of the database. */
     boardUrl: string;
+    /**
+     * The worker token the board authenticates this process by, or '' against an open board.
+     *
+     * Environment only — there is no config file here, and a credential that decides whether a
+     * process may run shell commands does not belong on a command line. It is also what tells the
+     * board which organization this driver works for, which is why it is minted per organization by
+     * `npm run worker-token` rather than shared between deployments.
+     */
+    boardToken: string;
     /** Names this driver on every claim, so a stuck job can be traced back to a process. */
     worker: string;
     /** Only used to build the runner's WORKDIR, `<workspaceMount>/<orgId>`. */
@@ -134,6 +143,7 @@ export function loadDriverConfig(env: NodeJS.ProcessEnv): DriverConfig {
 
     return {
         boardUrl,
+        boardToken: (env.JOB_BOARD_TOKEN ?? '').trim(),
         worker: text(env.DRIVER_WORKER, 'DRIVER_WORKER', `driver-${process.pid}`),
         orgId: text(env.ORG_ID, 'ORG_ID', DEFAULTS.orgId),
         image: text(env.EXECUTOR_IMAGE, 'EXECUTOR_IMAGE', DEFAULTS.image),

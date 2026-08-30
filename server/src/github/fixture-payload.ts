@@ -10,7 +10,7 @@ import type { RawPullRequest } from './schema.js';
 const PAYLOAD = new URL('../../fixtures/sample-payload.json', import.meta.url);
 
 /** The repo the committed payload was actually captured from. */
-export const FIXTURE_REPO = 'Leeloo-AI-RGA-OS/leeloo.ai';
+export const FIXTURE_REPO = 'Bellows-AI/bellows.ai';
 
 /**
  * The committed capture: 203 real PRs, taken 2026-08-21 and already post-backfill. It is kept

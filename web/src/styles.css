@@ -428,3 +428,38 @@ footer {
     padding: 12px 24px 32px;
     font-size: 12px;
 }
+
+.login-gate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 70vh;
+    text-align: center;
+}
+
+.login-gate p {
+    margin: 0;
+    color: var(--muted);
+}
+
+.login-error {
+    color: var(--bad);
+}
+
+/* An anchor, not a button, because the CSP blocks form submission and a fetch cannot follow the
+   redirect to github.com. Styled to match `button` so the difference is invisible. */
+.login-button {
+    background: #21262d;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 16px;
+    text-decoration: none;
+    margin-top: 8px;
+}
+
+.login-button:hover {
+    border-color: var(--primary);
+}

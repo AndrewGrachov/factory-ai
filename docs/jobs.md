@@ -319,9 +319,8 @@ Two things it does that are not decoration:
 - **It truncates `job` before the board phase.** The queue is FIFO, so a job left by an earlier run
   hands the claim a different job than the one under test — which reads as a broken lease rather
   than a dirty fixture. That misdiagnosis cost real time the first time this script ran.
-- **It starts the board with an empty `factory.toml`.** The repo's own config would otherwise reach
-  the run: its App credentials make `loadConfig` refuse a `*_test` database outright, and its
-  `workspace_root` starts cloning repositories.
+- **It exports `GITHUB_MODE=none` on every boot.** The default `app` makes `loadConfig` refuse a
+  `*_test` database outright, and a fetching board would start cloning repositories.
 
 The reclaim and fencing checks age `lease_expires_at` with `psql` rather than waiting a lease out,
 so the script stays a few seconds rather than a few minutes.

@@ -35,7 +35,7 @@ describe('OrgSelector', () => {
     it('says why it is inactive, not only that it is', () => {
         // A disabled control with no explanation reads as a bug or as a permissions problem.
         const html = render(CONFIG);
-        expect(html).toContain('factory.toml');
+        expect(html).toContain('ORG_ID');
         expect(html).toContain('one organization');
     });
 

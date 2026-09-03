@@ -1,9 +1,9 @@
 /**
  * The driver's configuration, read from the environment only.
  *
- * No factory.toml: the server's config file carries a GitHub App private key and describes a
- * dashboard. This process runs somewhere else — on the host, or in a container holding the docker
- * socket — and the two now have nothing in common at all: the board tells this process which
+ * No shared config with the server: that process carries a GitHub App private key and describes a
+ * dashboard. This one runs somewhere else — on the host, or in a container holding the docker
+ * socket — and the two have nothing in common at all: the board tells this process which
  * workspace a job belongs to, so it does not even need to know the organization.
  */
 export interface DriverConfig {

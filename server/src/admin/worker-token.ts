@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import postgres from 'postgres';
 import { hashToken } from '../auth/session.js';
 import { createAuthStore } from '../auth/store.js';
-import { resolveConfig } from '../config-file.js';
+import { resolveConfig } from '../config.js';
 import { migrate } from '../db/migrate.js';
 import { parseArgs, value } from './args.js';
 

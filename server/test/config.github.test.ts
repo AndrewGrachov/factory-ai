@@ -51,7 +51,7 @@ describe('GITHUB_MODE', () => {
 describe('the App private key', () => {
     it('is carried as a PEM, and only its shape is checked here', () => {
         // loadConfig does no I/O and no crypto: GITHUB_APP_PRIVATE_KEY_FILE is read by
-        // config-file.ts, and createPrivateKey runs when the token provider is constructed.
+        // resolveConfig, and createPrivateKey runs when the token provider is constructed.
         expect(loadConfig(app()).github).toMatchObject({ privateKeyPem: PEM });
     });
 

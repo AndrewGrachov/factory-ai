@@ -15,7 +15,7 @@ of decisions that look like cruft and are not, and most are guarded by a test th
 | `server/src/auth/*`, `010_auth.sql`, the session cookie, the worker token, which routes need a credential | [docs/auth.md](docs/auth.md) |
 | `server/src/github/app-*`, `repo-source.ts`, `GITHUB_MODE`, the App private key | [docs/configuration.md](docs/configuration.md) |
 | `attribute()` keys, `004_pull_requests.sql` keys, per-repo rendering | [docs/repos.md](docs/repos.md) |
-| `config.ts`, `config-file.ts`, compose env blocks, `factory.toml` | [docs/configuration.md](docs/configuration.md) |
+| `config.ts`, compose env blocks, `.env.example` | [docs/configuration.md](docs/configuration.md) |
 | `server/src/workspace/*`, `011_user_workspace.sql`, `ORG_WORKSPACE_ROOT`, the `git` install in the runtime image | [docs/workspace.md](docs/workspace.md) |
 | `server/src/telemetry/*`, OTLP routes, SQL views, collector config | [docs/telemetry.md](docs/telemetry.md) |
 | `server/src/routes/jobs.ts`, `db/job-store.ts`, `006_jobs.sql`, `driver/*` | [docs/jobs.md](docs/jobs.md) |
@@ -100,7 +100,7 @@ npm run test:jobs
 
 # Accounts. AUTH_MODE defaults to `none`, where every route is open and the bind address is the
 # access control — that is what `npm run dev`, seed, verify:ui and test-jobs run. `docker compose`
-# is the exception and pins `github`, uncontestable by factory.toml, because that stack holds the
+# is the exception and pins `github`, uncontestable by .env, because that stack holds the
 # checkouts. Somebody has to be invited before they can sign in — and after 010 an existing database
 # has nobody in it, which presents as "auth is broken" rather than "nobody has been invited".
 # auth.bootstrap_admin covers the first person.

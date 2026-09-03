@@ -27,12 +27,12 @@ Required GitHub App installation permissions: `Metadata: read`, `Pull requests: 
 **The App private key is the worst secret in this repository to leak, and it replaced the least
 bad.** A PAT carries whatever scopes it was issued with, can be revoked from a list, and expires; a
 private key mints installation tokens indefinitely, and rotating it means generating a new key in
-GitHub's UI and redeploying. It may sit on disk in `factory.toml` — gitignored and dockerignored —
+GitHub's UI and redeploying. It may sit inline in `.env` — gitignored and dockerignored —
 or in a `.pem` that `GITHUB_APP_PRIVATE_KEY_FILE` points at. `chmod 600` either: the boot warning
 about a group/world-readable mode is not decorative, because no application-level auth plus a
-readable key is worse than either alone. That warning covers `GITHUB_OAUTH_CLIENT_SECRET`,
-`SESSION_SECRET` and `INGEST_TOKEN` too — a file holding only a session secret is exactly as bad,
-and keying the check on one name would have left it silent.
+readable key is worse than either alone. The same care covers `GITHUB_OAUTH_CLIENT_SECRET`,
+`SESSION_SECRET` and `INGEST_TOKEN` — a `.env` holding only a session secret is exactly as bad
+to leak as one holding the key.
 
 **What the App improved:** the credential that reaches `git` is now an *installation token* that
 expires in an hour, rather than a long-lived PAT. A leaked one is a bounded problem, and it is

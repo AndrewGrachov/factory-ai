@@ -29,14 +29,11 @@ const shared = {
      * cloned; the repo list falls back to the repos the seeded database holds rows for, which is
      * exactly what the page is rendering.
      *
-     * A literal here rather than in the config file, unlike the absence of a token it replaces: an
-     * empty environment variable is not an override, but a non-empty one is, so this cannot be
-     * defeated by a developer's personal factory.toml the way `token` could.
+     * A literal here rather than left to chance: a non-empty environment variable always wins, so
+     * nothing a developer keeps in their own shell can reach this run.
      */
     GITHUB_MODE: 'none',
-    // Still pinned, because cwd is the repo root and a developer's gitignored factory.toml is
-    // discovered from there — it would otherwise supply an ORG_ID and point this run at their data.
-    FACTORY_CONFIG: `${root}e2e/factory.e2e.toml`,
+    BASE_BRANCH: 'dev',
 };
 
 /**
@@ -92,9 +89,6 @@ export default defineConfig({
                 ...shared,
                 PORT: String(PORT),
                 DATABASE_URL: 'postgres://factory:factory@127.0.0.1:5432/factory_e2e',
-                // Environment wins over the file, so both the organization assertion and the
-                // database the run seeds are deterministic whether or not a personal factory.toml
-                // exists — and in particular that file cannot point this at factory_dev.
                 ORG_ID: 'e2e-org',
                 ORG_NAME: 'E2E Org',
             },
@@ -131,10 +125,9 @@ export default defineConfig({
                 GITHUB_OAUTH_CLIENT_SECRET: 'stub-client-secret',
                 SESSION_SECRET: 'an-e2e-session-secret-of-at-least-32-chars',
                 PUBLIC_URL: `http://127.0.0.1:${AUTH_PORT}`,
-                // The three overrides that point the exchange at the stub. Environment only — they
-                // are deliberately absent from factory.toml's key set, and the server logs loudly
-                // when they are in use, because a configurable authorize URL reaching a real
-                // deployment would be a phishing vector.
+                // The three overrides that point the exchange at the stub. Environment only — and
+                // the server logs loudly when they are in use, because a configurable authorize
+                // URL reaching a real deployment would be a phishing vector.
                 GITHUB_OAUTH_AUTHORIZE_URL: `http://127.0.0.1:${IDP_PORT}/login/oauth/authorize`,
                 GITHUB_OAUTH_TOKEN_URL: `http://127.0.0.1:${IDP_PORT}/login/oauth/access_token`,
                 GITHUB_OAUTH_USER_URL: `http://127.0.0.1:${IDP_PORT}/user`,

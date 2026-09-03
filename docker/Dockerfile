@@ -54,8 +54,8 @@ COPY --from=build /app/core/test/fixtures/telemetry-sessions.json core/test/fixt
 # tsc compiles neither .sql nor .json, so the migrations and the raw GitHub capture have to be
 # copied by hand — both sit outside src/ at a depth that resolves the same from src/ and dist/.
 COPY --from=build /app/server/migrations server/migrations
-# No COPY for factory.toml, despite the precedent just above: it carries a GitHub token, so it
-# has to arrive as a read-only mount or as environment, never baked into an image layer.
+# No COPY for .env, despite the precedent just above: it carries secrets, so they
+# have to arrive as a read-only mount or as environment, never baked into an image layer.
 ENV WEB_ROOT=/app/web/dist
 ENV HOST=0.0.0.0
 # The mount point for docker-compose's `workspaces` volume, which ORG_WORKSPACE_ROOT defaults to.

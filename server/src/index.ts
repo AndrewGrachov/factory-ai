@@ -2,7 +2,7 @@ import postgres from 'postgres';
 import { buildApp } from './app.js';
 import { callbackPath, createGitHubIdentityClient } from './auth/github.js';
 import { createAuthStore } from './auth/store.js';
-import { resolveConfig } from './config-file.js';
+import { resolveConfig } from './config.js';
 import { createJobStore } from './db/job-store.js';
 import { migrate } from './db/migrate.js';
 import { createPrStore } from './db/pr-store.js';
@@ -18,8 +18,7 @@ import type { TokenProvider } from './github/token.js';
 import { createStatsService } from './stats-service.js';
 import { createFixtureTelemetryClient, createNullTelemetryClient } from './telemetry/fixture-client.js';
 
-const { config, source } = resolveConfig();
-console.log(`[config] ${source ?? 'no config file; environment only'}`);
+const { config } = resolveConfig();
 // The id, not just the name: it is the partition every stored row lands in, and a boot pointed at
 // an unexpected one is otherwise silent — the dashboard renders empty and looks like data loss.
 console.log(`[org] ${config.orgName} (${config.orgId})`);

@@ -21,7 +21,7 @@ export function OrgSelector({ organization }: { organization: OrganizationMeta }
     // WHY it is inactive, not merely that it is. A disabled control with no explanation reads as a
     // bug or as a permissions problem; this says it is a property of the deployment.
     const reason = locked
-        ? 'This deployment reports on one organization, set in factory.toml. Switching becomes available when accounts can belong to more than one.'
+        ? 'This deployment reports on one organization, set by ORG_ID. Switching becomes available when accounts can belong to more than one.'
         : 'Switch organization';
 
     return (

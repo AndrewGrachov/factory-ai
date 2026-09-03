@@ -84,7 +84,7 @@ shared volume". Under decision 2 that becomes:
 | [04-git-mirror](04-git-mirror.md) | Mirror lifecycle, locking, gc, `git-http-backend` CGI bridge, upload-pack-only enforcement | 00 |
 | [05-job-and-runtime](05-job-and-runtime.md) | Job/Pod spec, init container, volumes, security context, `entrypoint.mjs`, result and log capture, short-lived git token delivery, agent image | 02, 03, 04 |
 | [06-api-and-auth](06-api-and-auth.md) | `POST`/`GET`/cancel `/api/tasks`, check ordering, status codes, the auth mechanism, the CLI | 01 |
-| [07-config](07-config.md) | `ExecutorIntakeConfig`, `[executor]` TOML keys, the `bool` kind, `DEPLOYMENT_ONLY`, `loadExecutorConfig` | 00 |
+| [07-config](07-config.md) | `ExecutorIntakeConfig`, the executor env keys, `loadExecutorConfig` | 00 |
 | [08-deploy](08-deploy.md) | `deploy/k8s/` kustomize tree, RBAC verbs, NetworkPolicy, quotas, compose profile, `e2e-cluster.sh` | 03, 05 |
 
 ## Build order, and why
@@ -116,7 +116,7 @@ Owned by [01](01-schema-and-store.md), listed here because every spec assumes it
 | `vitest.config.ts` | add `'executor/test/**/*.test.ts'` to `include` |
 | `vitest.db.config.ts` | add `'server/test-db/**/*.test.ts'` (new directory) |
 | `docker/Dockerfile` | **`COPY executor/package.json executor/`** in the `deps` *and* `runtime` stages |
-| `server/src/config-file.ts` | register the `[executor]` section — see [07](07-config.md) |
+| `server/src/config.ts` | add the `executor` intake keys — see [07](07-config.md) |
 
 The Dockerfile line is the trap: root `npm ci` needs every workspace manifest, so adding the
 workspace **breaks the existing dashboard image** until it lands, and only in the container — never

@@ -6,9 +6,8 @@
  * door living in production code. A stub the server is pointed at through three environment
  * variables keeps the whole flow real on this side of the wire while nothing leaves the machine.
  *
- * The server logs loudly at boot when these overrides are in use, and they are deliberately absent
- * from factory.toml's key set, because a configurable authorize URL that reached a real deployment
- * would be a phishing vector.
+ * The server logs loudly at boot when these overrides are in use, because a configurable authorize
+ * URL that reached a real deployment would be a phishing vector.
  */
 import { createServer } from 'node:http';
 

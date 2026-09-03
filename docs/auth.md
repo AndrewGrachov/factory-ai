@@ -32,8 +32,8 @@ unauthenticated request was remote code execution.
   inside a container that is normal and the isolation is compose's `127.0.0.1:8080:8080` publish,
   which `loadConfig` cannot see and must not guess at.
 - **`docker-compose.yml` pins `AUTH_MODE=github` as a literal, and no longer sets that hatch.** It
-  is the one key in that file a mounted `factory.toml` is not allowed to win, which is the whole
-  point: a wall that a config file can lower is not a wall. That stack keeps the organization's
+  is the one key in that file `.env` is not allowed to win, which is the whole point: a wall that
+  an environment variable can lower is not a wall. That stack keeps the organization's
   checkouts and serves `POST /api/jobs`, so it identifies its callers — while `none` stays the
   default everywhere else, because the four things in the bullet above need it. Turning the port
   open is now an edit to that line, and the hatch has to come back with it.
@@ -177,8 +177,8 @@ Plus `POST /api/auth/logout` and `GET /api/auth/me`.
   and would bring a provider registry and a refresh-token model this codebase does not share. The
   seam is also what keeps `npm test` offline. `@fastify/cookie` **is** a dependency, because cookie
   serialisation is a spec with edge cases and no design decisions in it.
-- **The three endpoint URLs are overridable from the environment only** — deliberately absent from
-  `config-file.ts`'s `KEYS`. A configurable authorize URL in a file that ships with a deployment is a
+- **The three endpoint URLs are overridable from the environment only** — deliberately undocumented
+  as deployment configuration. A configurable authorize URL that ships with a deployment is a
   phishing vector; as an environment variable it is a test seam that `index.ts` logs loudly when it
   is in use. `e2e/stub-idp.mjs` is the only thing that sets them.
 - **`auth.public_url` is required once `HOST` is not loopback.** The `redirect_uri` must be absolute

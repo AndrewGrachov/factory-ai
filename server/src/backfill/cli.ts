@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { resolveConfig } from '../config-file.js';
+import { resolveConfig } from '../config.js';
 import { migrate } from '../db/migrate.js';
 import { backfillTranscripts } from './transcripts.js';
 

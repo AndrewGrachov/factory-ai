@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { resolveConfig } from '../src/config-file.js';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 const DB = 'postgres://factory:factory@127.0.0.1:5432/factory_dev';
 const env = (extra: NodeJS.ProcessEnv = {}) => ({ DATABASE_URL: DB, GITHUB_MODE: 'none', ...extra });
@@ -59,15 +55,5 @@ describe('the workspace root', () => {
          * a deployment that will not boot.
          */
         expect(() => loadConfig(env({ ORG_WORKSPACE_ROOT: '/srv/factory' }))).not.toThrow();
-    });
-
-    it('names the TOML key, not the environment variable, when the file is at fault', () => {
-        const dir = mkdtempSync(join(tmpdir(), 'factory-workspace-'));
-        writeFileSync(join(dir, 'factory.toml'), '[organization]\nworkspace_root = "work"\n');
-        // loadConfig only knows env keys, so an unrewritten message would send the reader looking
-        // for a variable they never set.
-        expect(() => resolveConfig({ env: { DATABASE_URL: DB, GITHUB_MODE: 'none' }, cwd: dir })).toThrow(
-            /from organization\.workspace_root in/,
-        );
     });
 });

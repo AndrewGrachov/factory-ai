@@ -4,7 +4,7 @@ Read before: touching `org_id` anywhere, `server/migrations/005_organizations.sq
 or the org selector in the topbar.
 
 An **organization owns the repo list and partitions every stored row.** There is exactly one per
-deployment, defined by `[organization]` in `factory.toml` — `meta.organization.mode` is the literal
+deployment, defined by `ORG_ID`/`ORG_NAME` — `meta.organization.mode` is the literal
 `'config'`. The selector in the topbar is a real `<select disabled>`; mode 2 turns it on by dropping
 one attribute.
 

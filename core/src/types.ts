@@ -15,7 +15,7 @@ export interface Organization {
 
 export interface OrganizationMeta {
     /**
-     * 'config'    — one org, defined in factory.toml. `available` is exactly `[current]`.
+     * 'config'    — one org, defined by ORG_ID/ORG_NAME. `available` is exactly `[current]`.
      * 'directory' — orgs come from a user directory; `available` is this caller's memberships.
      *
      * A discriminant rather than an inference from `available.length > 1`, because those are

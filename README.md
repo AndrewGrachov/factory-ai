@@ -35,18 +35,13 @@ docker compose exec timescale psql -U factory -d postgres -c 'create database fa
 DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run seed
 GITHUB_MODE=none DATABASE_URL=postgres://factory:factory@127.0.0.1:5432/factory_seed npm run dev
 
-# Live, via the config file
-cp factory.toml.example factory.toml && chmod 600 factory.toml   # set [github] app_id, private_key
-npm run dev
-
-# Live, via the environment instead — it overrides factory.toml wherever they disagree
+# Live, via the environment
 cp .env.example .env   # set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY
 npm run dev
 
 # The organization is identity only. There is no repo list here any more.
-#   [organization]
-#   id   = "bellows-ai"
-#   name = "Bellows AI"
+ORG_ID=bellows-ai
+ORG_NAME="Bellows AI"
 ```
 
 **There is no repo list to configure.** Install the GitHub App on the repositories you want measured,
@@ -82,7 +77,7 @@ fetched or overwritten, and nothing is ever pruned; see [docs/workspace.md](docs
 ## Auth
 
 **`docker compose up` requires a GitHub sign-in.** `docker-compose.yml` pins `AUTH_MODE=github`,
-and unlike almost everything else in that file a mounted `factory.toml` cannot override it. Fill in
+and unlike almost everything else in that file `.env` cannot override it. Fill in
 `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `SESSION_SECRET` (32+ chars), `PUBLIC_URL`
 and `AUTH_BOOTSTRAP_ADMIN` in `.env` — a missing one is fatal at boot and names itself, rather than
 falling back to an open port. Register an **OAuth App**, not a GitHub App, with the callback at

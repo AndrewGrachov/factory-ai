@@ -25,8 +25,8 @@ variable no user could change.
   and mounts a named volume there.** The paragraph above is about defaulting a *host* path, which
   compose is not doing — `/workspaces` exists only inside the container it also provisions. It is a
   literal rather than empty-defaulted like `ORG_ID` / `ORG_NAME` for the same reason as before:
-  those are host-independent identifiers a mounted `factory.toml` should win, while a
-  `workspace_root` in that file is a host path that cannot exist in the container.
+  those are host-independent identifiers, while this is a path — and a host value from `.env` is a
+  path on the host that cannot exist in the container.
   **Consequence changed:** `docker compose up` no longer clones anything. Boot checks nothing out;
   a clone happens only after somebody signs in and picks repositories.
 - **The volume is named, not a bind mount, and it is mounted unconditionally.** The container runs

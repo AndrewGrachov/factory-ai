@@ -183,15 +183,10 @@ docker build -q -t "$IMAGE_OK" -f "$work/Dockerfile.ok" "$work" >/dev/null &&
     exit 1
 }
 
-# An empty config file, so the repo's own factory.toml cannot reach this run: its App credentials
-# would make loadConfig refuse a *_test database, and its workspace_root would point the board at a
-# developer's real checkouts.
-#
 # A workspace root IS set, under $work, and it has to be: with none, the board reports a null
 # `workspacePath` on every claim and the driver fails each job rather than guessing a directory.
 # Nothing is cloned into it — clones only happen when somebody selects repositories — so this costs
 # one empty directory per job author.
-: >"$work/factory.toml"
 
 # GITHUB_MODE=none on every boot below. It defaults to `app`, which is fatal without an App id and
 # private key — deliberately, so nobody reaches "fetches nothing" by forgetting a variable. This
@@ -200,7 +195,7 @@ export GITHUB_MODE=none
 
 echo "starting the board on $BASE"
 env DATABASE_URL="$DATABASE_URL" PORT="$PORT" HOST=127.0.0.1 \
-    FACTORY_CONFIG="$work/factory.toml" ORG_WORKSPACE_ROOT="$work/workspaces" \
+    ORG_WORKSPACE_ROOT="$work/workspaces" \
     node server/dist/index.js >"$work/server.log" 2>&1 &
 server_pid=$!
 
@@ -393,7 +388,7 @@ AUTH_PORT=$((PORT + 1))
 AUTH_BASE="http://127.0.0.1:$AUTH_PORT"
 
 env DATABASE_URL="$DATABASE_URL" PORT="$AUTH_PORT" HOST=127.0.0.1 \
-    FACTORY_CONFIG="$work/factory.toml" ORG_WORKSPACE_ROOT="$work/workspaces" \
+    ORG_WORKSPACE_ROOT="$work/workspaces" \
     AUTH_MODE=github \
     GITHUB_OAUTH_CLIENT_ID=stub-client GITHUB_OAUTH_CLIENT_SECRET=stub-secret \
     SESSION_SECRET=a-job-harness-session-secret-32-chars \
@@ -423,10 +418,8 @@ else
     expect_status_at "$AUTH_BASE" 'queueing a job needs a login' 401 POST /api/jobs '{"command":"rm -rf /"}'
     expect_status_at "$AUTH_BASE" 'claiming needs a worker token' 401 POST /api/jobs/claim '{"worker":"driver-1"}'
 
-    # Minted the way an operator mints one: printed once, only its hash stored. Pointed at the same
-    # empty config the board uses — the CLI runs loadConfig too, so the repo's own factory.toml
-    # would otherwise refuse a *_test database on account of the App credentials in it.
-    token="$(env DATABASE_URL="$DATABASE_URL" FACTORY_CONFIG="$work/factory.toml" \
+    # Minted the way an operator mints one: printed once, only its hash stored.
+    token="$(env DATABASE_URL="$DATABASE_URL" \
         node server/dist/admin/worker-token.js --name harness-driver 2>>"$work/auth-server.log" |
         sed -n 's/.*JOB_BOARD_TOKEN=//p' | tr -d ' \r')"
     case "$token" in

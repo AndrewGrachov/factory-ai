@@ -6,8 +6,7 @@
 ## Scope
 
 Two config surfaces that must not become one: what the **server** needs to accept a task, and what the
-**controller** needs to run one. Plus the `config-file.ts` changes that let `factory.toml` carry an
-`[executor]` section without breaking the dashboard.
+**controller** needs to run one.
 
 ## Non-goals
 
@@ -20,21 +19,21 @@ The routes that read the config ([06](06-api-and-auth.md)); the controller that 
 
 | Consumer | Lives in | Reads |
 | --- | --- | --- |
-| Server (intake) | `server/src/config.ts` → `AppConfig.executor` | `factory.toml` `[executor]` + env |
+| Server (intake) | `server/src/config.ts` → `AppConfig.executor` | env only |
 | Controller (deployment) | `executor/src/config.ts` → `loadExecutorConfig(env)` | **env only** |
 
-**Controller-only settings — namespace, image, service account, resources — have no `factory.toml`
-form.** They are deployment facts that belong in the Kubernetes manifest, and putting them in a file
-the *server* also parses would mean `loadConfig` validating fields it can never act on. A field
-nothing reads is a field that drifts.
+Both sides read the environment. There is no config file in this repository, and this design does
+not add one: a file the *server* also parses would mean `loadConfig` validating fields it can never
+act on, and a field nothing reads is a field that drifts. Controller-only settings — namespace,
+image, service account, resources — are deployment facts that belong in the Kubernetes manifest.
 
 This is also what keeps `executor` from depending on `@factory-ai/server`.
 
 | Rejected | Why |
 | --- | --- |
 | `executor` imports `resolveConfig` from `server` | Makes an application a library for one call. |
-| Duplicate the `KEYS` table in `executor` | Two sources of truth for a closed key set — the exact drift `config-file.ts` exists to prevent. |
-| Hoist `config-file.ts` into `core` | Needs `smol-toml`, and "core has no dependencies" is a stated invariant. |
+| One shared env-key table for both sides | Two processes with two lifecycles sharing one closed key set is the exact drift a closed key set exists to prevent; each validator owns only the keys it acts on. |
+| Hoist a shared parser into `core` | Couples core to executor concerns, and "core has no executor knowledge" is a stated invariant. |
 
 ---
 
@@ -64,9 +63,9 @@ export interface AppConfig {
 
 One nested object rather than eight loose booleans on `AppConfig`.
 
-**The API secret is deliberately NOT in `AppConfig`.** `server/src/executor-token.ts` reads it from the
-merged env, mirroring `envTokenProvider` in `server/src/github/token.ts`, so nothing that logs the
-config can leak it — the same reason `GITHUB_TOKEN` is not there.
+**The API secret is deliberately NOT in `AppConfig`.** `server/src/executor-token.ts` reads it from
+the env, mirroring `envTokenProvider` in `server/src/github/token.ts`, so nothing that logs the
+config can leak it — the same reason the App private key is not there.
 
 `loadConfig` still does **no I/O**. `loadConfig({})` has to mean the same thing on every machine, and
 it must keep returning `executor: null` so the existing `describe('loadConfig')` block keeps meaning
@@ -74,25 +73,25 @@ what it means.
 
 ---
 
-## 3. `[executor]` — `factory.toml` keys, server-consumed
+## 3. Executor intake — env keys, server-consumed
 
-`server/src/config-file.ts` needs a new `Kind: 'bool'`. TOML `true` → env `"true"`; a **quoted
-`"true"` is rejected**, consistent with the existing rule that `ttl_seconds = "900"` is rejected.
+Booleans follow the existing env convention: `1`/`true` are accepted, because in the environment
+every value is a string and there is nothing to distinguish.
 
-| TOML | env | kind | default | validation (all fatal) |
-| --- | --- | --- | --- | --- |
-| `executor.enabled` | `EXECUTOR_ENABLED` | bool | `false` | must be `true`/`false` |
-| `executor.api_tokens` | `EXECUTOR_API_TOKENS` | list | — | **fatal if `enabled` and empty**; each entry `name:secret[:trusted]`; **fatal if any secret < 32 chars** |
-| `executor.tools` | `EXECUTOR_TOOLS` | list | `["claude-code"]` | non-empty; every entry in `KNOWN_AGENT_TOOLS` |
-| `executor.default_tool` | `EXECUTOR_DEFAULT_TOOL` | string | first of `tools` | must be in `tools` |
-| `executor.default_permission_mode` | `EXECUTOR_DEFAULT_PERMISSION_MODE` | string | `"acceptEdits"` | one of three |
-| `executor.allow_full_permissions` | `EXECUTOR_ALLOW_FULL_PERMISSIONS` | bool | `false` | — |
-| `executor.max_queued_per_hour` | `EXECUTOR_MAX_QUEUED_PER_HOUR` | int | `20` | positive |
-| `executor.max_attempts` | `EXECUTOR_MAX_ATTEMPTS` | int | **`1`** | 1–5 |
-| `executor.task_timeout_seconds` | `EXECUTOR_TASK_TIMEOUT_SECONDS` | int | `1800` | 60–86400 |
-| `executor.mcp_servers` | `EXECUTOR_MCP_SERVERS` | list | `[]` | names the intake will accept |
-| `executor.store_logs` | `EXECUTOR_STORE_LOGS` | bool | `false` | — |
-| `executor.log_tail_bytes` | `EXECUTOR_LOG_TAIL_BYTES` | int | `16384` | positive, ≤ 1 MB |
+| env | kind | default | validation (all fatal) |
+| --- | --- | --- | --- |
+| `EXECUTOR_ENABLED` | bool | `false` | must be `1`/`true`/`0`/`false` |
+| `EXECUTOR_API_TOKENS` | list | — | **fatal if `enabled` and empty**; each entry `name:secret[:trusted]`; **fatal if any secret < 32 chars** |
+| `EXECUTOR_TOOLS` | list | `["claude-code"]` | non-empty; every entry in `KNOWN_AGENT_TOOLS` |
+| `EXECUTOR_DEFAULT_TOOL` | string | first of `tools` | must be in `tools` |
+| `EXECUTOR_DEFAULT_PERMISSION_MODE` | string | `"acceptEdits"` | one of three |
+| `EXECUTOR_ALLOW_FULL_PERMISSIONS` | bool | `false` | — |
+| `EXECUTOR_MAX_QUEUED_PER_HOUR` | int | `20` | positive |
+| `EXECUTOR_MAX_ATTEMPTS` | int | **`1`** | 1–5 |
+| `EXECUTOR_TASK_TIMEOUT_SECONDS` | int | `1800` | 60–86400 |
+| `EXECUTOR_MCP_SERVERS` | list | `[]` | names the intake will accept |
+| `EXECUTOR_STORE_LOGS` | bool | `false` | — |
+| `EXECUTOR_LOG_TAIL_BYTES` | int | `16384` | positive, ≤ 1 MB |
 
 **`max_attempts` defaults to 1** because a retry re-runs a prompt against push credentials. Auto-retry
 is opted into, never inherited.
@@ -100,24 +99,9 @@ is opted into, never inherited.
 **`enabled` defaults to `false`** because the attack surface must be opt-in ([06](06-api-and-auth.md)
 §2).
 
-### Two edits to `config-file.ts` beyond the key table
-
-1. **Register the `[executor]` section.** An unknown TOML *section* is fatal, so a shared
-   `factory.toml` carrying `[executor]` would stop the **dashboard** booting until this lands.
-2. **Extend the readability warning.** `readConfigFile` currently warns about a group/world-readable
-   file only when it carries `GITHUB_TOKEN`. Extend the condition to `EXECUTOR_API_TOKENS` — otherwise
-   a mode-644 file holding a key to remote code execution warns about nothing.
-
-### `DEPLOYMENT_ONLY`
-
-Since an unknown TOML key is fatal, `executor.namespace` in `factory.toml` would produce "unknown key
-executor.namespace", which reads as a typo in something the operator reasonably expected to work.
-`config-file.ts` gains a **`DEPLOYMENT_ONLY`** map beside the existing `MOVED` / `REMOVED` maps:
-
-> `factory.toml: executor.namespace is set on the controller Deployment, not in this file —
-> deployment settings are environment-only so the dashboard does not validate fields it cannot act on.`
-
-Populate it with every key in §4.
+**A stale `EXECUTOR_NAMESPACE` in the server's environment is ignored, not fatal** — the server
+never acts on controller-only keys, and an unknown environment variable is ignored by `loadConfig`
+except for the named legacy set. Nothing to do here; noted so nobody adds a validation.
 
 ### `docker-compose.yml`
 
@@ -126,9 +110,8 @@ EXECUTOR_ENABLED: ${EXECUTOR_ENABLED:-}
 EXECUTOR_API_TOKENS: ${EXECUTOR_API_TOKENS:-}
 ```
 
-**Empty-defaulted**, joining the `ORG_*` three, for exactly the reason stated there: an empty
-environment variable is not an override, and a literal default would clobber a mounted `factory.toml`
-on every start. Here it would additionally either **silently enable an RCE endpoint** or silently
+**Empty-defaulted**, joining the `ORG_*` pair, for exactly the reason stated there: an unset value
+stays unset. A literal default here would either **silently enable an RCE endpoint** or silently
 disable the token on it.
 
 ---
@@ -197,8 +180,7 @@ obvious thing to do and it is wrong.
 | File | Must assert |
 | --- | --- |
 | `server/test/config.executor.test.ts` | `loadConfig({})` returns `executor: null`. `enabled` without tokens is **fatal**. A 20-char secret is **fatal**. `default_tool` not in `tools` is fatal. `default_permission_mode` outside the enum is fatal. `max_attempts` outside 1–5 is fatal. `timeoutSeconds` outside 60–86400 is fatal. **The secret does not appear anywhere in the returned `AppConfig`** (search the serialised object). |
-| `server/test/config.file.test.ts` (extend) | `[executor]` keys parse. The new `bool` kind: `true` accepted, `"true"` rejected. `executor.namespace` produces the `DEPLOYMENT_ONLY` message and not "unknown key". The readability warning fires on a file holding `api_tokens` and **no** PAT. An empty `EXECUTOR_ENABLED` env var does not override a file value. |
-| `executor/test/config.test.ts` | `loadExecutorConfig({})` is fatal on the missing required fields. The poll floor. `lease < timeout`. `grace ≥ 2 × lease`. `RUNNER_BACKEND=local` does **not** require `EXECUTOR_IMAGE`. **No I/O**: `loadExecutorConfig({})` throws identically with a `factory.toml` present in cwd. |
+| `executor/test/config.test.ts` | `loadExecutorConfig({})` is fatal on the missing required fields. The poll floor. `lease < timeout`. `grace ≥ 2 × lease`. `RUNNER_BACKEND=local` does **not** require `EXECUTOR_IMAGE`. **No I/O**: `loadExecutorConfig({})` throws identically regardless of what sits in cwd. |
 
 The "search the serialised object" assertion is the one that keeps the secret out of logs. Written as a
 field check it passes the day someone adds a new field.
@@ -209,6 +191,4 @@ field check it passes the day someone adds a new field.
 `server/test/config.executor.test.ts`, `executor/test/config.test.ts`.
 
 **Modify:** `server/src/config.ts` (`ExecutorIntakeConfig`, the `executor` discriminant),
-`server/src/config-file.ts` (section registration, `bool` kind, `DEPLOYMENT_ONLY`, readability
-warning), `docker-compose.yml`, `factory.toml.example`, `.env.example`,
-`server/test/config.file.test.ts`, `docs/configuration.md`.
+`docker-compose.yml`, `.env.example`, `docs/configuration.md`.

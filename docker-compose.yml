@@ -46,8 +46,7 @@ services:
             # `app` is the default, and it is fatal without an id and a key — so a stack with no App
             # registered has to say `none`, where the dashboard serves whatever is already in the
             # database. That is a supported way to run, but it is not one you arrive at by
-            # forgetting a variable. Empty-defaulted so a mounted factory.toml's [github] can supply
-            # them instead.
+            # forgetting a variable.
             GITHUB_MODE: ${GITHUB_MODE:-app}
             GITHUB_APP_ID: ${GITHUB_APP_ID:-}
             # Optional: discovered from the App when the App is installed in exactly one place.
@@ -56,16 +55,15 @@ services:
             # Alternatively mount the .pem and point GITHUB_APP_PRIVATE_KEY_FILE at it.
             GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
             GITHUB_APP_PRIVATE_KEY_FILE: ${GITHUB_APP_PRIVATE_KEY_FILE:-}
-            # Empty-defaulted, unlike most of this block, so a mounted factory.toml's
-            # [organization] still wins: an empty variable is not an override. A literal default
-            # here would clobber the file's organization.id on every start, and that id leads every
-            # stored primary key — the dashboard would come back empty and read as data loss.
+            # Empty-defaulted, unlike most of this block, so an unset value stays unset: that id
+            # leads every stored primary key, and a literal default here would silently point an
+            # existing database's dashboard at a different, empty partition on every start.
             ORG_ID: ${ORG_ID:-}
             ORG_NAME: ${ORG_NAME:-}
             # A literal default, unlike the ORG_* pair above, and the volume below is mounted to
-            # match: this is a path INSIDE the container, so a `workspace_root` in a mounted
-            # factory.toml is a host path that cannot exist here and clobbering it is the correct
-            # outcome. Those two are host-independent identifiers; this one is not.
+            # match: this is a path INSIDE the container, so a host value from .env would be a path
+            # on the host that cannot exist here, and clobbering it is the correct outcome. Those
+            # two are host-independent identifiers; this one is not.
             #
             # `up` no longer clones anything on its own. Checkouts are per member now, at
             # <root>/<orgId>/<userId>/<repo>, and they are created when somebody signs in and picks
@@ -80,14 +78,13 @@ services:
             # host: a factory_dev on the host is a different database from this one, and pointing
             # the container at it would silently split history across two.
             DATABASE_URL: postgres://factory:factory@timescale:5432/factory_dev
-            FACTORY_CONFIG: ${FACTORY_CONFIG:-}
-            # A literal, and the one place in this file where a mounted factory.toml is deliberately
-            # NOT allowed to win. `none` is still a supported mode and still the default everywhere
-            # else — `npm run seed`, `verify:ui` and `scripts/test-jobs.sh` need it, and a clone with
-            # no OAuth app has no way to obtain one — but this stack keeps its checkouts and runs
-            # POST /api/jobs, so it identifies its callers. A mode that could be turned off by
-            # editing a config file is not a wall. Flip this line to open the port; nothing else
-            # will do it for you. See docs/auth.md.
+            # A literal, and the one place in this file .env is deliberately NOT allowed to win.
+            # `none` is still a supported mode and still the default everywhere else — `npm run
+            # seed`, `verify:ui` and `scripts/test-jobs.sh` need it, and a clone with no OAuth app
+            # has no way to obtain one — but this stack keeps its checkouts and runs POST /api/jobs,
+            # so it identifies its callers. A mode that could be turned off by editing .env is not a
+            # wall. Flip this line to open the port; nothing else will do it for you. See
+            # docs/auth.md.
             AUTH_MODE: github
             GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
             GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
@@ -108,10 +105,10 @@ services:
             # unreachable from the published port and `curl :5173` simply hangs.
             VITE_DEV_HOST: '0.0.0.0'
         volumes:
-            # The working tree, live. This is the whole point of the file. A factory.toml comes in
-            # with it and needs no mount of its own — note that most variables above are *real*
-            # values, not absent ones, so they still win over the file; env-first stays the
-            # contract. The ORG_* three are the exception, deliberately: see the comment on them.
+            # The working tree, live. This is the whole point of the file. Note that most variables
+            # above are *real* values, not absent ones, so they win over anything the mounted .env
+            # would hand node's --env-file; the environment-first contract stays intact. The ORG_*
+            # three are the exception, deliberately: see the comment on them.
             - .:/app
             # node_modules must NOT come from the host: the host tree holds darwin binaries (esbuild
             # and rollup among them) that cannot execute in a Linux container. These named volumes

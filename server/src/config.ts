@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { DEFAULT_BOTS } from '@factory-ai/core';
 import type { TelemetrySource } from './telemetry/client.js';
@@ -298,7 +299,7 @@ function workspaceRootOf(env: NodeJS.ProcessEnv): string | null {
  * `[github]`, or the one field `none` mode has.
  *
  * Pure, like the rest of loadConfig. In particular the private key arrives here already read:
- * GITHUB_APP_PRIVATE_KEY_FILE is resolved by config-file.ts, so this validator never learns that a
+ * GITHUB_APP_PRIVATE_KEY_FILE is resolved by resolveConfig, so this validator never learns that a
  * file exists — the same rule that keeps `loadConfig({})` meaning one thing on every machine.
  */
 function loadGitHub(env: NodeJS.ProcessEnv): GitHubConfig {
@@ -346,7 +347,7 @@ function loadGitHub(env: NodeJS.ProcessEnv): GitHubConfig {
         appId: appId!,
         installationId,
         privateKeyPem: pem,
-        // Environment only, and deliberately absent from config-file.ts's KEYS, for the same reason
+        // Environment only, and deliberately not a documented variable, for the same reason
         // the three GITHUB_OAUTH_*_URL overrides are: a configurable API host in a file that ships
         // with a deployment is somewhere to send a credential. index.ts logs it when it is set.
         apiUrl: (env.GITHUB_API_URL?.trim() || 'https://api.github.com').replace(/\/+$/, ''),
@@ -461,9 +462,9 @@ function loadAuth(env: NodeJS.ProcessEnv, host: string, port: number): AuthConfi
         bootstrapAdmin: env.AUTH_BOOTSTRAP_ADMIN?.trim().toLowerCase() || null,
         autoJoinGithubOrg: env.AUTH_AUTO_JOIN_GITHUB_ORG?.trim() || null,
         ingestToken,
-        // Environment only, and deliberately absent from config-file.ts's KEYS. A configurable
-        // authorize URL in a file that ships with a deployment is a phishing vector; as an
-        // environment variable it stays a test seam that index.ts logs loudly when it is used.
+        // Environment only. A configurable authorize URL in a file that ships with a deployment is
+        // a phishing vector; as an environment variable it stays a test seam that index.ts logs
+        // loudly when it is used.
         authorizeUrl: env.GITHUB_OAUTH_AUTHORIZE_URL?.trim() || 'https://github.com/login/oauth/authorize',
         tokenUrl: env.GITHUB_OAUTH_TOKEN_URL?.trim() || 'https://github.com/login/oauth/access_token',
         userUrl: env.GITHUB_OAUTH_USER_URL?.trim() || 'https://api.github.com/user',
@@ -527,7 +528,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     // protect its quota would otherwise silently drop to a 60s floor.
     if (env.CACHE_TTL_SECONDS) {
         throw new Error(
-            'CACHE_TTL_SECONDS is no longer supported: refreshes are incremental now, so SYNC_TTL_SECONDS is the only cache floor. Rename it, or move the line to cache.sync_ttl_seconds in factory.toml.',
+            'CACHE_TTL_SECONDS is no longer supported: refreshes are incremental now, so SYNC_TTL_SECONDS is the only cache floor. Rename it.',
         );
     }
 
@@ -610,4 +611,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         workspaceRoot,
         auth: loadAuth(env, host, port),
     });
+}
+
+/**
+ * The entry point every process uses. Environment only: there is no config file, so what reaches
+ * the validator is the process environment.
+ *
+ * The one piece of I/O allowed here is GITHUB_APP_PRIVATE_KEY_FILE, read into
+ * GITHUB_APP_PRIVATE_KEY before the validator runs — so `loadConfig` stays a pure function of its
+ * argument and never learns that a file exists. An inline key wins over a FILE path, and an
+ * explicit path that cannot be read is fatal and says why; the usual cause is a host file at mode
+ * 600 bind-mounted into a container running as `node`.
+ */
+export function resolveConfig(options: { env?: NodeJS.ProcessEnv } = {}): { readonly config: AppConfig } {
+    const env = options.env ?? process.env;
+    const path = env.GITHUB_APP_PRIVATE_KEY_FILE?.trim();
+    if (!path || env.GITHUB_APP_PRIVATE_KEY) return { config: loadConfig(env) };
+    try {
+        return { config: loadConfig({ ...env, GITHUB_APP_PRIVATE_KEY: readFileSync(path, 'utf8').trim() }) };
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        throw new Error(
+            `GITHUB_APP_PRIVATE_KEY_FILE points at ${path}, which could not be read (${code ?? 'unknown error'})`,
+        );
+    }
 }

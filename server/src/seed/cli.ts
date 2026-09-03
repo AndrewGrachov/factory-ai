@@ -18,7 +18,7 @@
  */
 import postgres from 'postgres';
 import { createAuthStore } from '../auth/store.js';
-import { resolveConfig } from '../config-file.js';
+import { resolveConfig } from '../config.js';
 import { migrate } from '../db/migrate.js';
 import { createPrStore } from '../db/pr-store.js';
 import { generate } from './synthetic.js';
@@ -47,7 +47,7 @@ function databaseName(url: string): string {
 const { config } = resolveConfig({ env: { ...process.env, GITHUB_MODE: 'none' } });
 
 if (!config.databaseUrl) {
-    console.error('seed requires DATABASE_URL (or telemetry.database_url in factory.toml)');
+    console.error('seed requires DATABASE_URL');
     process.exit(1);
 }
 

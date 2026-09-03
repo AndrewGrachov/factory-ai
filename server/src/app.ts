@@ -5,6 +5,7 @@ import { registerAuth } from './auth/plugin.js';
 import type { AuthStore } from './auth/store.js';
 import type { AppConfig } from './config.js';
 import type { JobStore } from './db/job-store.js';
+import type { UserExecutorStore } from './db/user-executor-store.js';
 import type { UserRepoStore } from './db/user-repo-store.js';
 import type { RepoSource } from './github/repo-source.js';
 import { createFactsCache } from './workspace/facts.js';
@@ -41,6 +42,8 @@ export interface AppDeps {
      * removes them, and that is the route tests' mode.
      */
     userRepos?: UserRepoStore | undefined;
+    /** Rides the same registration bargain as userRepos — no store, no routes. */
+    userExecutors?: UserExecutorStore | undefined;
     /** Absent in the route tests, where nothing should start cloning. */
     cloneQueue?: CloneQueue | undefined;
     /**
@@ -86,6 +89,7 @@ export async function buildApp({
     store,
     jobs,
     userRepos,
+    userExecutors,
     cloneQueue,
     auth,
     identity,
@@ -118,6 +122,7 @@ export async function buildApp({
             workspaceRoutes({
                 config,
                 store: userRepos,
+                executors: userExecutors ?? null,
                 repos,
                 // One cache per app, not per request: the whole point of it is that a poll every
                 // two seconds does not become a `git log` and a directory walk every two seconds.

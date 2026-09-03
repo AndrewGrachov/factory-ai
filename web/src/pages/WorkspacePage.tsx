@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useWorkspace } from '../api/useWorkspace.js';
 import { useShell } from '../components/AppShell.js';
+import { ExecutorDialog } from '../components/ExecutorDialog.js';
 import { RepoPickerDialog } from '../components/RepoPickerDialog.js';
+import { WorkspaceExecutorsPanel } from '../panels/WorkspaceExecutorsPanel.js';
 import { WorkspaceReposPanel } from '../panels/WorkspaceReposPanel.js';
 
 export function WorkspacePage() {
     const { data: stats } = useShell();
-    const { data, loading, error, saving, save } = useWorkspace();
+    const { data, loading, error, saving, save, saveExecutors } = useWorkspace();
     const [picking, setPicking] = useState(false);
+    const [addingExecutor, setAddingExecutor] = useState(false);
     /**
      * Dismissal is remembered for this page view only, so "Not now" is not a decision somebody has
      * to undo later. The persistent way back in is the button below and the empty state.
@@ -106,11 +109,22 @@ export function WorkspacePage() {
                 </section>
             ) : null}
 
+            <WorkspaceExecutorsPanel
+                executors={data?.executors ?? []}
+                onAdd={() => setAddingExecutor(true)}
+            />
+
             <RepoPickerDialog
                 open={picking}
                 selected={data?.repos ?? []}
                 onClose={close}
                 onSave={save}
+                saving={saving}
+            />
+            <ExecutorDialog
+                open={addingExecutor}
+                onClose={() => setAddingExecutor(false)}
+                onSave={saveExecutors}
                 saving={saving}
             />
         </main>

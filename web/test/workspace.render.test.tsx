@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { WorkspaceRepo } from '../src/api/useWorkspace.js';
 import { pollDelay } from '../src/api/useWorkspace.js';
 import { bytes, commitDate } from '../src/format.js';
+import { WorkspaceExecutorsPanel } from '../src/panels/WorkspaceExecutorsPanel.js';
 import { WorkspaceReposPanel } from '../src/panels/WorkspaceReposPanel.js';
 import { repoMetrics } from '../src/workspace/join.js';
 
@@ -72,6 +73,29 @@ describe('the workspace panel', () => {
         const html = render([repo({ status: 'failed', error: 'fatal: repository not found' })], [], null);
         expect(html).toContain('failed');
         expect(html).toContain('fatal: repository not found');
+    });
+});
+
+describe('the executors panel', () => {
+    it('says "No executors configured" when the list is empty', () => {
+        const html = renderToStaticMarkup(
+            <WorkspaceExecutorsPanel executors={[]} onAdd={() => {}} />,
+        );
+        expect(html).toContain('No executors configured');
+        expect(html).toContain('Add executor');
+    });
+
+    it('renders a row per executor with its type, and never a placeholder value', () => {
+        const html = renderToStaticMarkup(
+            <WorkspaceExecutorsPanel
+                executors={[{ name: 'main', type: 'claude-code', createdAt: '2026-09-01T00:00:00.000Z' }]}
+                onAdd={() => {}}
+            />,
+        );
+        expect(html).toContain('main');
+        expect(html).toContain('claude-code');
+        expect(html).not.toContain('No executors configured');
+        for (const token of FORBIDDEN) expect(html, token).not.toContain(token);
     });
 });
 

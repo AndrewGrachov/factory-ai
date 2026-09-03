@@ -141,6 +141,22 @@ true: the Workspace page reports each checkout's branch, newest commit and size 
 - **`null` means "not measured", never zero.** A repository that is still cloning has no size, and
   `0 B` would be a claim about an empty repository. The same contract the metrics panels follow.
 
+## Executors
+
+The page also shows the member's configured executors, below the repositories. This is
+**configuration storage only**: a row is the JSON a member pasted into the add dialog, and nothing
+runs an executor yet — wiring one into the driver is future work.
+
+- **The dialog is add-only, and validation is structural.** The contract is "raw JSON the member
+  pastes"; the server checks it is an object with a known type, unique path-segment-safe names, at
+  most 10 per member, and the `user_executor` check constraint restates the type list at the row.
+  Field-level rules wait until a consumer exists that can be wrong about them.
+- **`config` is never echoed by the poll.** It may hold credentials the member pasted, and
+  `GET /api/workspace` can run every two seconds. The row's `name`, `type` and `createdAt` travel;
+  the JSON stays in the table.
+- **The whole list is a PUT.** Same argument as the repos selection: the body is the entire list,
+  so a retried request after a dropped connection changes nothing.
+
 ## Limitations
 
 - **Nothing prunes, and per-member checkouts multiply that by the number of members.** Deselecting a

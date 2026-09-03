@@ -7,6 +7,7 @@ import { createJobStore } from './db/job-store.js';
 import { migrate } from './db/migrate.js';
 import { createPrStore } from './db/pr-store.js';
 import { createUserRepoStore } from './db/user-repo-store.js';
+import { createUserExecutorStore } from './db/user-executor-store.js';
 import { createCloneQueue } from './workspace/queue.js';
 import { createPostgresTelemetryClient } from './telemetry/postgres-client.js';
 import { createPostgresStore } from './telemetry/store.js';
@@ -114,6 +115,7 @@ const jobStore = createJobStore({
 // none, the routes still answer and report that the feature is off. Only the QUEUE is conditional,
 // because there is nowhere to clone to.
 const userRepoStore = createUserRepoStore({ sql, orgId: config.orgId, ready });
+const userExecutorStore = createUserExecutorStore({ sql, orgId: config.orgId, ready });
 const cloneQueue = config.workspaceRoot
     ? createCloneQueue({
           store: userRepoStore,
@@ -176,6 +178,7 @@ const app = await buildApp({
     store,
     jobs: jobStore,
     userRepos: userRepoStore,
+    userExecutors: userExecutorStore,
     cloneQueue,
     auth: authStore,
     identity,

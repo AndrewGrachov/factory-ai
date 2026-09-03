@@ -18,6 +18,8 @@ export {
     SIZE_BUCKETS,
     isRevertHeadline,
 } from './config.js';
+export type { ExecutorType } from './executors.js';
+export { EXECUTOR_TYPES } from './executors.js';
 export type { SizeBucket } from './config.js';
 export {
     compute,

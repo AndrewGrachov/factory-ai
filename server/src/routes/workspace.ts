@@ -1,7 +1,9 @@
 import { join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
+import { EXECUTOR_TYPES } from '@factory-ai/core';
 import { callerOf } from '../auth/plugin.js';
 import { bad, body as jsonBody, guard } from './helpers.js';
+import type { UserExecutor, UserExecutorStore } from '../db/user-executor-store.js';
 import { fullName, type AppConfig, type Repo } from '../config.js';
 import type { UserRepo, UserRepoStore } from '../db/user-repo-store.js';
 import type { RepoSource } from '../github/repo-source.js';
@@ -27,6 +29,12 @@ import { workspaceDir } from '../workspace/reconcile.js';
  */
 export const MAX_REPOS_PER_USER = 20;
 
+/**
+ * A ceiling on how many executors one person can configure. Like MAX_REPOS_PER_USER, not a policy
+ * about what anybody needs — just the bound that keeps one pasted list from growing without limit.
+ */
+export const MAX_EXECUTORS_PER_USER = 10;
+
 const BODY_LIMIT = 64 * 1024;
 
 /**
@@ -38,15 +46,21 @@ const BODY_LIMIT = 64 * 1024;
  * deployment will not boot" to "this one repository is refused, by name" — and `user_repo_name_ck`
  * says the same thing a third time, at the row.
  */
+function badSegment(label: string, value: string): string | null {
+    if (!value) return `${label} is empty`;
+    if (/[/\\]/.test(value)) return `${label} contains a path separator`;
+    // A leading '-' is read by git as an option rather than a path; '.' and '..' are not names.
+    if (/^[-.]/.test(value)) return `${label} starts with "-" or "."`;
+    return null;
+}
+
 function badName(repo: Repo): string | null {
     for (const [label, value] of [
         ['owner', repo.owner],
         ['name', repo.name],
     ] as const) {
-        if (!value) return `${label} is empty`;
-        if (/[/\\]/.test(value)) return `${label} contains a path separator`;
-        // A leading '-' is read by git as an option rather than a path; '.' and '..' are not names.
-        if (/^[-.]/.test(value)) return `${label} starts with "-" or "."`;
+        const reason = badSegment(label, value);
+        if (reason) return reason;
     }
     return null;
 }
@@ -68,16 +82,52 @@ function parseSelection(raw: unknown): Repo[] | string {
     return parsed;
 }
 
+/**
+ * The authoritative structural validation for a pasted executor list; the client's copy is UX only.
+ *
+ * No field-level schema inside `config` for now: the contract is "raw JSON the member pastes", and
+ * deepening validation belongs to the day an actual consumer exists and can be wrong about the
+ * fields. The route guards shape; 012's check constraints guard the row.
+ */
+function parseExecutors(raw: unknown): { name: string; type: string; config: Record<string, unknown> }[] | string {
+    const list = jsonBody(raw).executors;
+    if (!Array.isArray(list)) return 'executors must be an array of { name, type, config }';
+    if (list.length > MAX_EXECUTORS_PER_USER) {
+        return `at most ${MAX_EXECUTORS_PER_USER} executors can be configured at once`;
+    }
+    const parsed: { name: string; type: string; config: Record<string, unknown> }[] = [];
+    for (const entry of list) {
+        const item = entry as { name?: unknown; type?: unknown; config?: unknown };
+        if (typeof item?.name !== 'string' || typeof item?.type !== 'string') {
+            return 'each entry must be { name: string, type: string, config: object }';
+        }
+        if (
+            typeof item.config !== 'object' ||
+            item.config === null ||
+            Array.isArray(item.config)
+        ) {
+            return `config for "${item.name}" must be a JSON object`;
+        }
+        if (!(EXECUTOR_TYPES as readonly string[]).includes(item.type)) {
+            return `unknown executor type "${item.type}" (known: ${EXECUTOR_TYPES.join(', ')})`;
+        }
+        parsed.push({ name: item.name, type: item.type, config: item.config as Record<string, unknown> });
+    }
+    return parsed;
+}
+
 export interface WorkspaceRoutesDeps {
     readonly config: AppConfig;
     readonly store: UserRepoStore;
+    /** Null in the same configurations queue is: a store is always built in index.ts. */
+    readonly executors: UserExecutorStore | null;
     readonly repos: RepoSource;
     readonly facts: FactsCache;
     readonly queue: CloneQueue | null;
 }
 
 export const workspaceRoutes =
-    ({ config, store, repos, facts, queue }: WorkspaceRoutesDeps): FastifyPluginAsync =>
+    ({ config, store, executors, repos, facts, queue }: WorkspaceRoutesDeps): FastifyPluginAsync =>
     async (app) => {
         const root = config.workspaceRoot;
 
@@ -105,7 +155,7 @@ export const workspaceRoutes =
 
             // 200 with a null root, never a 503. "Workspaces are switched off" is a configuration an
             // operator chose, and the page renders a sentence about it rather than an error.
-            if (!root) return reply.code(200).send({ root: null, repos: [], orphaned: [] });
+            if (!root) return reply.code(200).send({ root: null, repos: [], orphaned: [], executors: [] });
 
             const loaded = await guard(reply, (e) => request.log.error({ err: e }), async () => {
                 // Idempotent, and not redundant with the call in the sign-in callback: it covers
@@ -118,17 +168,29 @@ export const workspaceRoutes =
                     login: caller.user.login,
                     githubUserId: caller.user.githubUserId,
                 });
-                return Promise.all([store.list(caller.user.id), store.orphaned(caller.user.id)]);
+                return Promise.all([
+                    store.list(caller.user.id),
+                    store.orphaned(caller.user.id),
+                    executors ? executors.list(caller.user.id) : Promise.resolve([]),
+                ]);
             });
             if (!loaded.ok) return reply;
 
-            const [selected, orphaned] = loaded.value;
+            const [selected, orphaned, executorRows] = loaded.value;
             return reply.code(200).send({
                 root: workspaceDir(root, config.orgId, caller.user.id),
                 repos: selected.map((row) => describe(caller.user.id, row)),
                 // Deselected, still on disk, nothing prunes them. Reported so that growth is at
                 // least visible on the page rather than only in `df`.
                 orphaned: orphaned.map((row) => ({ owner: row.owner, name: row.name })),
+                // `config` is deliberately absent from these rows: it may hold credentials the
+                // member pasted, and this payload is fetched by a poll that can run every two
+                // seconds.
+                executors: executorRows.map((row: UserExecutor) => ({
+                    name: row.name,
+                    type: row.type,
+                    createdAt: row.createdAt,
+                })),
             });
         });
 
@@ -214,5 +276,64 @@ export const workspaceRoutes =
             // waited for one would be killed by any proxy in front of it long before it finished.
             queue?.kick();
             return reply.code(202).send({ repos: selection });
+        });
+
+        // PUT, whole-list replace — the same idiom as the repos route above. The body is the entire
+        // list, so replaying it after a dropped connection changes nothing.
+        app.put('/api/workspace/executors', { bodyLimit: BODY_LIMIT }, async (request, reply) => {
+            const caller = callerOf(request);
+            if (!caller) return bad(reply, 'UNAUTHENTICATED', 'Sign in required', 401);
+            if (!root) {
+                return bad(reply, 'WORKSPACE_DISABLED', 'This deployment has no workspace root configured', 409);
+            }
+            if (!executors) {
+                return reply.code(503).send({
+                    error: 'No executor store is configured for this deployment',
+                    code: 'UNAVAILABLE',
+                });
+            }
+
+            const list = parseExecutors(request.body);
+            if (typeof list === 'string') {
+                let code = 'BAD_BODY';
+                if (list.startsWith('at most')) code = 'TOO_MANY_EXECUTORS';
+                else if (list.startsWith('unknown executor type')) code = 'BAD_EXECUTOR_TYPE';
+                return bad(reply, code, list);
+            }
+
+            for (const executor of list) {
+                const reason = badSegment('name', executor.name);
+                if (reason) {
+                    return bad(
+                        reply,
+                        'BAD_EXECUTOR_NAME',
+                        `"${executor.name}" cannot be used as an executor name: ${reason}`,
+                    );
+                }
+            }
+
+            // A duplicate name in one body would otherwise surface as a primary-key violation,
+            // which the member would see as a 503.
+            const names = new Set(list.map((executor) => executor.name));
+            if (names.size !== list.length) {
+                return bad(reply, 'EXECUTOR_NAME_CONFLICT', 'executor names must be unique');
+            }
+
+            const saved = await guard(reply, (e) => request.log.error({ err: e }), async () => {
+                await executors.replace(caller.user.id, list);
+                // Answered from the store, not echoed from the body: created_at is the database's.
+                return executors.list(caller.user.id);
+            });
+            if (!saved.ok) return reply;
+
+            // 200, not 202: unlike the repos route nothing runs in the background — the rows are
+            // written by the time this returns.
+            return reply.code(200).send({
+                executors: saved.value.map((row) => ({
+                    name: row.name,
+                    type: row.type,
+                    createdAt: row.createdAt,
+                })),
+            });
         });
     };

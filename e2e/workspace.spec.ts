@@ -34,7 +34,7 @@ async function signedIn(page: Page) {
  */
 async function workspacePage(page: Page) {
     await page.goto('/workspace');
-    const dialog = page.locator('dialog.picker');
+    const dialog = page.locator('dialog[aria-labelledby="picker-title"]');
     await expect(dialog).toBeVisible();
     await page.getByRole('button', { name: 'Not now' }).click();
     await expect(dialog).toBeHidden();
@@ -88,7 +88,7 @@ test('the picker opens by itself when nothing is selected, and is genuinely moda
     await signedIn(page);
     await page.goto('/workspace');
 
-    const dialog = page.locator('dialog.picker');
+    const dialog = page.locator('dialog[aria-labelledby="picker-title"]');
     await expect(dialog).toBeVisible();
 
     /*
@@ -115,7 +115,7 @@ test('Escape closes the picker and the page stays usable', async ({ page }) => {
     await signedIn(page);
     await page.goto('/workspace');
 
-    const dialog = page.locator('dialog.picker');
+    const dialog = page.locator('dialog[aria-labelledby="picker-title"]');
     await expect(dialog).toBeVisible();
 
     // Escape is the browser's, not this component's — but it closes the element without telling
@@ -125,6 +125,33 @@ test('Escape closes the picker and the page stays usable', async ({ page }) => {
 
     await page.getByRole('button', { name: 'Select repositories' }).click();
     await expect(dialog).toBeVisible();
+});
+
+test('an executor is added through the dialog, with bad JSON refused in place', async ({ page }) => {
+    await signedIn(page);
+    await workspacePage(page);
+
+    await page.getByRole('button', { name: 'Add executor' }).click();
+    const dialog = page.locator('dialog[aria-labelledby="executor-title"]');
+    await expect(dialog).toBeVisible();
+    expect(await dialog.evaluate((node: HTMLDialogElement) => node.matches(':modal'))).toBe(true);
+
+    // Not valid JSON: the message appears under the field, and Save stays disabled.
+    await dialog.getByPlaceholder('main').fill('main');
+    await dialog.locator('textarea').fill('{ model: }');
+    await expect(dialog.getByRole('button', { name: 'Add' })).toBeDisabled();
+
+    await dialog.locator('textarea').fill('{ "model": "sonnet" }');
+    await dialog.getByRole('button', { name: 'Add' }).click();
+    await expect(dialog).toBeHidden();
+
+    // The row comes back through the poll, with its type — and the panel no longer says none.
+    const panel = page.locator('section.panel', { has: page.getByRole('heading', { name: 'Executors' }) });
+    await expect(panel.getByText('main')).toBeVisible();
+    await expect(panel.locator('.pill')).toHaveText('claude-code');
+    await expect(panel).not.toContainText('No executors configured');
+
+    await page.screenshot({ path: `${SHOTS}/workspace-executors.png`, fullPage: true });
 });
 
 test('the workspace page renders nothing malformed', async ({ page }) => {

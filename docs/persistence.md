@@ -31,6 +31,13 @@ request rather than a 202.
   row describes a directory nobody can reach once the account is gone. The clone queue's restart
   recovery assumes one dashboard process, and that assumption is written into the migration's
   header along with the escape hatch — see [workspace.md](workspace.md).
+- **`012_user_executors.sql` adds one table, `user_executor`.** Org-owned for the same reason
+  `user_repo` is: the config describes work inside this deployment, scoped to the member's tree.
+  Hard delete is safe here, and the whole-list PUT relies on it — unlike `user_repo` the row tracks
+  no disk state, so deleting it loses nothing but the pasted JSON. `type` is check-constrained to
+  the closed list in `core/src/executors.ts` and must be extended in both places in one change,
+  because altering a check on a populated table is a rewrite (`006`'s `job_status_ck` rule).
+  Nothing consumes the table yet; the driver wiring is future work.
 - **`migrate()` also reaps expired sessions**, at boot only. The read path checks `expires_at`
   regardless, so this is about the table not growing without bound on a deployment whose users never
   log out — not about enforcement.

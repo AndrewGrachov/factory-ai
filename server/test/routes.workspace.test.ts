@@ -8,11 +8,14 @@ import {
     githubAuth,
     harness,
     memoryAuthStore,
+    memoryUserExecutorStore,
     memoryUserRepoStore,
     signedIn,
     stubClient,
+    type MemoryUserExecutorStore,
     type MemoryUserRepoStore,
 } from './helpers.js';
+import { MAX_EXECUTORS_PER_USER } from '../src/routes/workspace.js';
 
 /**
  * Offline: nothing here clones. `PUT` only writes rows and answers 202 — the clone happens in the
@@ -42,10 +45,12 @@ const REPOS = [
 async function boot(options: { withRoot?: boolean } = {}) {
     const auth = memoryAuthStore();
     const caller = auth.seedMember('test-org', 'octocat');
+    const executors = memoryUserExecutorStore();
     const h = await harness({
         client: stubClient(),
         auth,
         userRepos: store,
+        userExecutors: executors,
         repos: REPOS,
         config: {
             workspaceRoot: options.withRoot === false ? null : root,
@@ -56,7 +61,7 @@ async function boot(options: { withRoot?: boolean } = {}) {
         },
     });
     app = h.app;
-    return { app: h.app, caller, cookie: await signedIn(auth, caller) };
+    return { app: h.app, caller, cookie: await signedIn(auth, caller), executors };
 }
 
 describe('GET /api/workspace', () => {
@@ -90,7 +95,7 @@ describe('GET /api/workspace', () => {
         const response = await app.inject({ method: 'GET', url: '/api/workspace', headers: { cookie } });
 
         expect(response.statusCode).toBe(200);
-        expect(response.json()).toEqual({ root: null, repos: [], orphaned: [] });
+        expect(response.json()).toEqual({ root: null, repos: [], orphaned: [], executors: [] });
     });
 
     it('needs a session', async () => {
@@ -232,6 +237,153 @@ describe('PUT /api/workspace/repos', () => {
             method: 'PUT',
             url: '/api/workspace/repos',
             payload: { repos: [] },
+        });
+        expect(response.statusCode).toBe(401);
+    });
+});
+
+describe('executors', () => {
+    const putExecutors = (app: FastifyInstance, cookie: string, executors: unknown) =>
+        app.inject({
+            method: 'PUT',
+            url: '/api/workspace/executors',
+            headers: { cookie },
+            payload: { executors },
+        });
+
+    const CLAUDE_CODE = { name: 'main', type: 'claude-code', config: { model: 'sonnet' } };
+
+    it('lists executors in the GET payload, without their config', async () => {
+        // The config may hold credentials the member pasted, and this payload is a poll that can
+        // run every two seconds.
+        const { app, cookie, executors } = await boot();
+        await putExecutors(app, cookie, [CLAUDE_CODE]);
+
+        const body = (await app.inject({ method: 'GET', url: '/api/workspace', headers: { cookie } })).json();
+        expect(body.executors).toEqual([expect.objectContaining({ name: 'main', type: 'claude-code' })]);
+        expect(JSON.stringify(body)).not.toContain('sonnet');
+        expect(executors.rows()[0]?.config).toEqual({ model: 'sonnet' });
+    });
+
+    it('replaces the whole list, so replaying the same body changes nothing', async () => {
+        const { app, cookie, executors } = await boot();
+        await putExecutors(app, cookie, [CLAUDE_CODE]);
+        await putExecutors(app, cookie, [
+            { name: 'second', type: 'claude-code', config: {} },
+        ]);
+
+        expect(executors.rows().map((row) => row.name)).toEqual(['second']);
+    });
+
+    it('keeps members apart', async () => {
+        const auth = memoryAuthStore();
+        const a = auth.seedMember('test-org', 'octocat');
+        const b = auth.seedMember('test-org', 'scallop');
+        const executors = memoryUserExecutorStore();
+        const h = await harness({
+            client: stubClient(),
+            auth,
+            userRepos: store,
+            userExecutors: executors,
+            repos: REPOS,
+            config: { workspaceRoot: root, auth: githubAuth() },
+        });
+        app = h.app;
+        const cookieA = await signedIn(auth, a);
+        const cookieB = await signedIn(auth, b);
+
+        await putExecutors(h.app, cookieA, [CLAUDE_CODE]);
+        await putExecutors(h.app, cookieB, []);
+
+        expect(executors.rows().map((row) => row.userId)).toEqual([a.user.id]);
+    });
+
+    it('refuses an unknown type', async () => {
+        const { app, cookie } = await boot();
+        const response = await putExecutors(app, cookie, [
+            { name: 'x', type: 'codex', config: {} },
+        ]);
+
+        expect(response.statusCode).toBe(400);
+        expect(response.json().code).toBe('BAD_EXECUTOR_TYPE');
+    });
+
+    it('refuses a config that is not a JSON object', async () => {
+        const { app, cookie } = await boot();
+        for (const config of [[], 'text', 7, null]) {
+            const response = await putExecutors(app, cookie, [
+                { name: 'x', type: 'claude-code', config },
+            ]);
+            expect(response.statusCode, String(config)).toBe(400);
+        }
+    });
+
+    it('refuses duplicate names, by name rather than as a key violation', async () => {
+        const { app, cookie } = await boot();
+        const response = await putExecutors(app, cookie, [
+            CLAUDE_CODE,
+            { name: 'main', type: 'claude-code', config: {} },
+        ]);
+
+        expect(response.statusCode).toBe(400);
+        expect(response.json().code).toBe('EXECUTOR_NAME_CONFLICT');
+    });
+
+    it('refuses a name that cannot become a directory, by name', async () => {
+        const { app, cookie } = await boot();
+        for (const name of ['-x', '.', '..', 'a/b', '']) {
+            const response = await putExecutors(app, cookie, [
+                { name, type: 'claude-code', config: {} },
+            ]);
+            expect(response.statusCode, name).toBe(400);
+            expect(response.json().code, name).toBe('BAD_EXECUTOR_NAME');
+        }
+    });
+
+    it('caps how many executors one member can configure', async () => {
+        const { app, cookie } = await boot();
+        const many = Array.from({ length: MAX_EXECUTORS_PER_USER + 1 }, (_, i) => ({
+            name: `e${i}`,
+            type: 'claude-code',
+            config: {},
+        }));
+        const response = await putExecutors(app, cookie, many);
+
+        expect(response.statusCode).toBe(400);
+        expect(response.json().code).toBe('TOO_MANY_EXECUTORS');
+    });
+
+    it('rejects a body that is not a list of { name, type, config }', async () => {
+        const { app, cookie } = await boot();
+        expect((await putExecutors(app, cookie, 'main')).statusCode).toBe(400);
+        expect((await putExecutors(app, cookie, [{ name: 'x', type: 'claude-code' }])).statusCode).toBe(400);
+    });
+
+    it('answers 409 rather than writing rows when workspaces are switched off', async () => {
+        const { app, cookie, executors } = await boot({ withRoot: false });
+        const response = await putExecutors(app, cookie, [CLAUDE_CODE]);
+
+        expect(response.statusCode).toBe(409);
+        expect(response.json().code).toBe('WORKSPACE_DISABLED');
+        expect(executors.rows()).toEqual([]);
+    });
+
+    it('answers 200, because nothing runs in the background', async () => {
+        // Unlike the repos route's 202 there is no clone to wait out; the rows are written by the
+        // time the response is sent.
+        const { app, cookie } = await boot();
+        const response = await putExecutors(app, cookie, [CLAUDE_CODE]);
+
+        expect(response.statusCode).toBe(200);
+        expect(response.json().executors[0]).toMatchObject({ name: 'main', type: 'claude-code' });
+    });
+
+    it('needs a session', async () => {
+        const { app } = await boot();
+        const response = await app.inject({
+            method: 'PUT',
+            url: '/api/workspace/executors',
+            payload: { executors: [] },
         });
         expect(response.statusCode).toBe(401);
     });

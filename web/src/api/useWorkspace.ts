@@ -20,12 +20,20 @@ export interface WorkspaceRepo {
     sizeBytes: number | null;
 }
 
+export interface WorkspaceExecutor {
+    name: string;
+    type: string;
+    createdAt: string;
+    /** Deliberately absent from the payload: it may hold credentials, and this is polled. */
+}
+
 export interface WorkspacePayload {
     /** Null when this deployment has no workspace root, which is a supported way to run. */
     root: string | null;
     repos: WorkspaceRepo[];
     /** Deselected, still on disk. Nothing prunes them; showing them is what makes that visible. */
     orphaned: { owner: string; name: string }[];
+    executors: WorkspaceExecutor[];
 }
 
 export interface UseWorkspace {
@@ -34,6 +42,9 @@ export interface UseWorkspace {
     error: string | null;
     saving: boolean;
     save: (repos: { owner: string; name: string }[]) => Promise<string | null>;
+    saveExecutors: (
+        executors: { name: string; type: string; config: object }[],
+    ) => Promise<string | null>;
     refresh: () => void;
 }
 
@@ -167,5 +178,34 @@ export function useWorkspace(): UseWorkspace {
         [start],
     );
 
-    return { data, loading, error, saving, save, refresh: start };
+    /** The executor PUT is not asynchronous — nothing clones — so no re-arm timing is needed. */
+    const saveExecutors = useCallback(
+        async (executors: { name: string; type: string; config: object }[]): Promise<string | null> => {
+            setSaving(true);
+            try {
+                const response = await fetch('/api/workspace/executors', {
+                    method: 'PUT',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ executors }),
+                });
+                if (response.status === 401) {
+                    reportUnauthenticated();
+                    return 'Your session expired';
+                }
+                if (!response.ok) {
+                    const body = (await response.json().catch(() => ({}))) as { error?: string };
+                    return body.error ?? `Could not save the executors (${response.status})`;
+                }
+                start();
+                return null;
+            } catch (e) {
+                return (e as Error).message;
+            } finally {
+                setSaving(false);
+            }
+        },
+        [start],
+    );
+
+    return { data, loading, error, saving, save, saveExecutors, refresh: start };
 }

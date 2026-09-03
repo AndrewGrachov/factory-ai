@@ -6,6 +6,7 @@ import { SESSION_COOKIE, hashToken, mintToken, sign } from '../src/auth/session.
 import type { AuthStore, Caller, Role } from '../src/auth/store.js';
 import type { AppConfig, AuthConfig } from '../src/config.js';
 import type { PrStore, SyncState } from '../src/db/pr-store.js';
+import type { UserExecutorStore } from '../src/db/user-executor-store.js';
 import type { CloneStatus, UserRepo, UserRepoStore } from '../src/db/user-repo-store.js';
 import type { ForgeClient, PullRequestsResult } from '../src/forge.js';
 import { fixturePayload } from '../src/github/fixture-payload.js';
@@ -419,6 +420,67 @@ export function memoryUserRepoStore(): MemoryUserRepoStore {
     };
 }
 
+export interface MemoryUserExecutorStore extends UserExecutorStore {
+    /** Every row, so a test can assert what a PUT wrote and what a later PUT replaced. */
+    rows(): { userId: string; name: string; type: string; config: Record<string, unknown> }[];
+}
+
+/**
+ * An in-memory UserExecutorStore, for the same reason memoryUserRepoStore exists. The SQL behind it
+ * is covered by server/test-db, which needs a container.
+ */
+export function memoryUserExecutorStore(): MemoryUserExecutorStore {
+    interface Row {
+        userId: string;
+        name: string;
+        type: string;
+        config: Record<string, unknown>;
+        createdAt: string;
+        updatedAt: string;
+    }
+    const rows: Row[] = [];
+    const at = () => new Date().toISOString();
+
+    return {
+        rows: () =>
+            rows.map((r) => ({
+                userId: r.userId,
+                name: r.name,
+                type: r.type,
+                config: structuredClone(r.config),
+            })),
+
+        async replace(userId, executors) {
+            for (let i = rows.length - 1; i >= 0; i -= 1) {
+                if (rows[i]!.userId === userId) rows.splice(i, 1);
+            }
+            for (const executor of executors) {
+                rows.push({
+                    userId,
+                    name: executor.name,
+                    type: executor.type,
+                    config: structuredClone(executor.config),
+                    createdAt: at(),
+                    updatedAt: at(),
+                });
+            }
+        },
+
+        async list(userId) {
+            return rows
+                .filter((r) => r.userId === userId)
+                .map((r) => ({
+                    name: r.name,
+                    type: r.type,
+                    createdAt: r.createdAt,
+                    updatedAt: r.updatedAt,
+                }))
+                // The SQL orders the same way; created_at ties break on name.
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.name.localeCompare(b.name));
+        },
+    };
+}
+
 export interface MemoryAuthStore extends AuthStore {
     /**
      * Creates a claimed membership and returns the account, so a test can hold a session without
@@ -732,6 +794,8 @@ export async function harness(options: {
     repos?: readonly { owner: string; name: string }[];
     /** Absent by default, which leaves the workspace routes unregistered. */
     userRepos?: UserRepoStore;
+    /** Defaults to an empty in-memory store whenever userRepos is given. */
+    userExecutors?: UserExecutorStore;
 }) {
     const config = testConfig(options.config);
     const telemetry = options.telemetry ?? stubTelemetryClient();
@@ -745,11 +809,15 @@ export async function harness(options: {
         store: options.store ?? memoryPrStore(),
         now: () => clock,
     });
+    const executors = options.userRepos
+        ? (options.userExecutors ?? memoryUserExecutorStore())
+        : undefined;
     const app = await buildApp({
         config,
         service,
         repos,
         userRepos: options.userRepos,
+        userExecutors: executors,
         auth: options.auth,
         identity: options.identity,
         now: () => clock,
@@ -759,6 +827,7 @@ export async function harness(options: {
         service,
         client: options.client,
         telemetry,
+        executors,
         advance: (ms: number) => {
             clock += ms;
         },

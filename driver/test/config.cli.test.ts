@@ -24,10 +24,15 @@ describe('RUNNER_CLI', () => {
     });
 
     // The image has to speak the selected CLI, so the default follows the switch. An explicit
-    // EXECUTOR_IMAGE still wins — an operator pinning a registry image knows better than the default.
+    // EXECUTOR_IMAGE still wins — an operator pinning a registry image knows better than the
+    // default. The empty string counts as unset: that is exactly what compose's
+    // `${EXECUTOR_IMAGE:-}` delivers, and it is how the cli-aware default survives compose.
     it('defaults the image to the selected CLI\'s runner', () => {
         expect(loadDriverConfig({}).image).toBe('claude-executor');
         expect(loadDriverConfig({ RUNNER_CLI: 'opencode' }).image).toBe('opencode-executor');
+        expect(loadDriverConfig({ RUNNER_CLI: 'opencode', EXECUTOR_IMAGE: '' }).image).toBe(
+            'opencode-executor',
+        );
         expect(loadDriverConfig({ RUNNER_CLI: 'opencode', EXECUTOR_IMAGE: 'registry/oc:2' }).image).toBe(
             'registry/oc:2',
         );

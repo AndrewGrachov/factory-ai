@@ -37,9 +37,10 @@ docker/opencode-executor/test.sh
 
 Builds the image as `opencode-executor-test` and runs a handful of checks: the CLI answers with the
 pinned version, the baked `opencode.json` parses and carries exactly the expected permission block,
-the `$WORKDIR` contract holds (a missing directory exits `2`), and no credential is baked into the
-image. It is deliberately shallower than `docker/claude-executor/test.sh`; deepen it the first time
-something surprises us.
+the `$WORKDIR` contract holds (a missing directory exits `2`), no credential material is baked into
+the image, and one real `run` through the wrapper answers — via opencode's anonymous free tier,
+bounded by a timeout. It is deliberately shallower than `docker/claude-executor/test.sh`; deepen it
+the first time something surprises us.
 
 ## Run
 
@@ -85,8 +86,9 @@ To run another policy, mount your own over the baked file:
 opencode mints its own session ids (`ses_…`) and stores them under its data directory. The driver
 does not read them back out: minting a uuid and reporting it would put a session on the board that
 the runner never used, which is a lie the claude path never has to tell because its CLI accepts an
-id as input. A job run by this image shows no session link; its token spend still reaches the
-telemetry pipeline under opencode's own metric names.
+id as input. A job run by this image shows no session link. Its runs still emit OTLP, but the
+server's metric map carries no opencode rows yet, so spend records as an unmapped agent — null,
+never zero — until those rows are added (see `docs/limits.md`).
 
 ## Telemetry
 

@@ -38,6 +38,11 @@ request rather than a 202.
   the closed list in `core/src/executors.ts` and must be extended in both places in one change,
   because altering a check on a populated table is a rewrite (`006`'s `job_status_ck` rule).
   Nothing consumes the table yet; the driver wiring is future work.
+- **`013_opencode_executor_type.sql` adds `opencode` to that check**, the rewrite 012's header
+  warned about, by 008's drop-first pattern — 012 itself is never edited, exactly as 006 was not
+  when 008 added `standby`: an applied migration is skipped by filename, so editing it would
+  change nothing for an existing database and only lie about how the schema got there. The next
+  type is the same two-step move again: the array in `core/src/executors.ts` and a new migration.
 - **`migrate()` also reaps expired sessions**, at boot only. The read path checks `expires_at`
   regardless, so this is about the table not growing without bound on a deployment whose users never
   log out — not about enforcement.

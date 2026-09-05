@@ -74,12 +74,12 @@ const POLL_MS = 2_000;
 
 /**
  * Consecutive failed reads before the run is abandoned to its lease. About half a minute when the
- * API server answers fast, up to a few minutes when each attempt hangs out its request timeout —
- * enough to ride out an upgrade or a dropped connection, short enough that a half-dead API server
- * hands the job back to its lease instead of holding a worker slot for an hour. The kubelet's
- * deadline guarantees the JOB reaches a terminal state, but not that this driver can keep READING
- * it; an apiserver that answers 503 forever would otherwise renew a lease around a run nobody can
- * observe.
+ * API server answers fast, up to about eight minutes when every attempt hangs out its request
+ * timeout — enough to ride out an upgrade or a dropped connection, short enough that a half-dead
+ * API server hands the job back to its lease instead of holding a worker slot for an hour. The
+ * kubelet's deadline guarantees the JOB reaches a terminal state, but not that this driver can keep
+ * READING it; an apiserver that answers 503 forever would otherwise renew a lease around a run
+ * nobody can observe.
  */
 export const POLL_MAX_CONSECUTIVE_FAILURES = 15;
 
@@ -286,7 +286,7 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 
 /**
  * A uuid, and nothing else — asserted before `job.id` is interpolated into an API path or a pod
- * name. Copied from docker.ts:40, which re-asserts the same ids for the same reason.
+ * name. Copied from docker.ts's own UUID, which re-asserts the same ids for the same reason.
  */
 const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

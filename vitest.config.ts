@@ -9,6 +9,9 @@ export default defineConfig({
             'driver/test/**/*.test.ts',
             // Renders panels with react-dom/server, so no DOM and no browser is needed.
             'web/test/**/*.test.tsx',
+            // `.test.ts` too: web/test holds non-component suites (executor config validation)
+            // that a `.tsx`-only pattern silently dropped.
+            'web/test/**/*.test.ts',
         ],
         pool: 'forks',
         coverage: {

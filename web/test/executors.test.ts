@@ -58,4 +58,18 @@ describe('validateExecutorConfig', () => {
         // even if the answer is "none", or this record stops compiling.
         for (const type of EXECUTOR_TYPES) expect(type in REQUIRED_FIELDS).toBe(true);
     });
+
+    it('accepts an opencode executor with a plain object config', () => {
+        const result = validateExecutorConfig('{ "model": "x" }', 'main', 'opencode');
+        expect(result).toEqual({
+            ok: true,
+            value: { name: 'main', type: 'opencode', config: { model: 'x' } },
+        });
+    });
+
+    it('requires no config fields for opencode either', () => {
+        // Same raw-JSON contract as claude-code: field rules wait for a consumer that can be
+        // wrong about them.
+        expect(REQUIRED_FIELDS['opencode']).toEqual([]);
+    });
 });

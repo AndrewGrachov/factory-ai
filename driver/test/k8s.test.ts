@@ -561,6 +561,13 @@ describe('the kubernetes runner', () => {
         expect(calls[0].path).toContain(`jobs/${containerName(job)}`);
     });
 
+    // The id lands in the DELETE path the same way it lands in the create — asserted before it is
+    // interpolated, whatever the call.
+    it('kill refuses a job id that is not a uuid', async () => {
+        const { request } = fakeRequest();
+        await expect(runner(request).kill({ ...job, id: 'not-a-uuid' })).rejects.toThrow(/not a uuid/);
+    });
+
     // Remote Control is refused at config under this executor, and the loop only polls the remote
     // id under Remote Control — so the honest answer here is the interface's own null.
     it('answers null for the remote session id', async () => {

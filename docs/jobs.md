@@ -3,8 +3,9 @@
 Read before: touching `server/src/routes/jobs.ts`, `server/src/db/job-store.ts`,
 `server/migrations/006_jobs.sql` or anything under `driver/`.
 
-A job is a text command waiting for a worker — read as a Claude prompt, since the runner's
-`ENTRYPOINT` is the `claude` wrapper and the driver passes the command as `-p <command>`.
+A job is a text command waiting for a worker — read as an agent prompt. The runner's `ENTRYPOINT`
+is a CLI wrapper: the driver passes the command as `-p <command>` to claude-code, or as the
+positional prompt of `opencode run` under `RUNNER_CLI=opencode`.
 
 **The server hands jobs out and records results. It never spawns anything.** The driver claims a
 job, runs it in a `claude-executor` container against the AUTHOR's workspace checkout, and reports
@@ -18,7 +19,8 @@ POST /api/jobs/claim {worker}   -> 200 {id, command, leaseToken, leaseExpiresAt,
                                         userId, workspacePath, resumeSessionId} | 204
   every request carries `authorization: Bearer $JOB_BOARD_TOKEN`, when the board requires one
   resumeSessionId ? restore that session : mint one, POST /api/jobs/:id/session
-  spawn claude-executor with the command, as that session
+  spawn the runner with the command, as that session
+  (claude-code mints and reports a session uuid; opencode does neither — see below)
   POST /api/jobs/:id/heartbeat {leaseToken}     every leaseSeconds/3, while it runs
 POST /api/jobs/:id/complete {leaseToken, status, exitCode, output}
   ... or, if the runner went quiet:
@@ -37,8 +39,9 @@ A fourth workspace, with no dependency on `core` and none at run time at all. It
 HTTP board, never of the database — which is what lets it run anywhere the board is reachable.
 
 ```bash
-docker build -t claude-executor docker/claude-executor   # the runner image, once
-npm run driver                                           # against a board on 127.0.0.1:8080
+docker build -t claude-executor docker/claude-executor     # the claude-code runner image, once
+docker build -t opencode-executor docker/opencode-executor # the opencode runner image, once
+npm run driver                                             # against a board on 127.0.0.1:8080
 
 docker compose --profile driver up -d driver             # or in the stack
 ```
@@ -112,6 +115,21 @@ of the lease — 100s by default — and awaiting it before reporting left every
 in `running` for a minute and a half. Found by running the driver for real; a unit test with an
 instant fake clock cannot see it, so `loop.test.ts` models a period that never elapses.
 
+**`RUNNER_CLI=opencode` swaps the CLI behind the image, and with it the session contract.** The
+headless form becomes `run <command>`, and no session is minted, passed or reported: opencode
+mints its own ids and cannot adopt one — `run --session <id>` continues a session opencode
+created, it never creates one with a given id — so minting a uuid anyway would put a session on
+the board that the runner never used. These jobs show no session link. Their runs still emit OTLP,
+but the server's metric map carries no opencode rows yet, so spend records as an unmapped agent —
+null, never zero — until those rows are added (see [limits.md](limits.md)). The combination is
+refused at startup with `RUNNER_REMOTE_CONTROL` (that is claude-code's bridge) and with
+`RUNNER_SKIP_PERMISSIONS` (that appends a claude-code flag; opencode's permissions come from the
+`opencode.json` baked into its image — see [its README](../docker/opencode-executor/README.md)).
+A parked job claimed by an opencode driver is failed with a reason rather than restored: standby
+is a Remote Control feature, so a claim carrying `resumeSessionId` under opencode means the
+operator flipped `RUNNER_CLI` while something was parked, and re-running that command would
+re-enter a transcript somebody may have been driving by hand.
+
 ## The session ids, and driving a job from the Claude UI
 
 **There are two of them, and they are not interchangeable.**
@@ -122,7 +140,7 @@ instant fake clock cannot see it, so `loop.test.ts` models a period that never e
 | Comes from | the driver, which mints it | Anthropic's backend, when the bridge connects |
 | Known | before the container starts | seconds into the run, or never |
 | Good for | joining a job to its telemetry | `https://claude.ai/code/<id>` |
-| Headless jobs | always | never — a `-p` run registers no bridge |
+| Headless jobs | always, under claude-code; under opencode, none — it mints its own and the driver never sees one | never — a `-p` run registers no bridge |
 
 The link is built from the **remote** one. Using the local uuid gives a dead URL, which is an easy
 mistake to make and a hard one to notice: both are called "the session id", both are present, and

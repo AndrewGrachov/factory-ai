@@ -35,3 +35,10 @@ Read before: reporting a number as measured, or "fixing" something in this list.
   asserts against a stub. `005_organizations.sql` preserves the constraint deliberately rather than
   fixing it in passing: the repair is a unique index over `coalesce(branch, '')`, which changes the
   `on conflict` target in three write paths and deserves its own review.
+- **An opencode run's token spend reads as null, never zero**, until
+  `server/src/telemetry/metric-map.ts` gains rows for opencode's metric names: `agentOf()` resolves
+  an unmapped agent to `'unknown'` and `session_field_total` filters those rows out. The runs still
+  emit OTLP — the data accumulates before the mapping exists, which is why the driver can spawn
+  `RUNNER_CLI=opencode` before the server can price it. The image's OTEL surface itself
+  (`docker/opencode-executor`) is likewise unverified against a real collector; check its
+  `OTEL_EXPORTER_OTLP_*` env first if metrics do not arrive.

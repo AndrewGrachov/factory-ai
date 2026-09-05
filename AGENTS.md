@@ -45,9 +45,11 @@ npm run dev:web        # vite only (needs the API running for /api)
 npm run build          # core -> server -> web -> driver, in that order
 npm start              # node server/dist/index.js (requires build)
 
-# The job driver: claims jobs from the board and spawns a claude-executor per job. Needs a docker
-# daemon and the runner image (`docker build -t claude-executor docker/claude-executor`). It talks
-# to the board over HTTP only — never to the database — so JOB_BOARD_URL is all it needs to find.
+# The job driver: claims jobs from the board and spawns a runner container per job (claude-executor,
+# or opencode-executor under RUNNER_CLI=opencode). Needs a docker daemon and the runner image or
+# images (`docker build -t claude-executor docker/claude-executor`, `docker build -t
+# opencode-executor docker/opencode-executor`). It talks to the board over HTTP only — never to the
+# database — so JOB_BOARD_URL is all it needs to find.
 npm run driver
 
 npm test               # vitest run — offline, no token, no quota, no database, no docker

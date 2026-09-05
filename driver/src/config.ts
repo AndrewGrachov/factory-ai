@@ -29,6 +29,13 @@ export interface DriverConfig {
      */
     image: string;
     /**
+     * Which CLI the runner image speaks: claude-code's `--session-id <uuid>` / `-p <prompt>` form,
+     * or opencode's headless `run <prompt>` form. The union is COPIED, not imported from core's
+     * EXECUTOR_TYPES: this package depends on nothing, deliberately (see AGENTS.md), and one string
+     * union does not change that.
+     */
+    cli: 'claude-code' | 'opencode';
+    /**
      * The docker volume holding the checkouts — a NAME, not a host path. The dashboard writes them
      * into a named volume precisely so no host directory is involved, and a runner spawned from
      * inside a container could not resolve a host path anyway.
@@ -86,6 +93,30 @@ export interface DriverConfig {
      * credential in a command line every `ps` on the host can read.
      */
     passEnv: readonly string[];
+    /**
+     * What spawns the runner: the host's docker daemon (default, the original path), or the
+     * Kubernetes API server the driver's own pod talks to — see k8s.ts. An explicit enum, fatal on
+     * an unknown value, because a typo must not read as "docker is fine" and quietly spawn nothing.
+     */
+    executor: 'docker' | 'kubernetes';
+    /**
+     * The namespace the kubernetes executor creates runner Jobs in. Meaningless under docker. The
+     * chart sets it through the downward API, so the driver follows whichever namespace it lands in.
+     */
+    k8sNamespace: string;
+    /**
+     * The name of a Secret holding the runner credentials under the kubernetes executor — one key
+     * per RUNNER_ENV name. The k8s form of `-e NAME`: the names travel, the values live in a Secret
+     * the cluster already holds, and nothing readable lands in the pod spec. Null forwards nothing.
+     */
+    credentialsSecret: string | null;
+    /**
+     * The runner image's pull policy, under the kubernetes executor. Kubernetes defaults to
+     * `Always` for an untagged or :latest image, which would reach past the node's local images to
+     * a registry that has never heard of `claude-executor` — where the docker runner would simply
+     * have used what the daemon holds. `IfNotPresent` is that behavior, stated.
+     */
+    imagePullPolicy: string;
 }
 
 const DEFAULTS = {
@@ -137,6 +168,40 @@ export function loadDriverConfig(env: NodeJS.ProcessEnv): DriverConfig {
         throw new Error(`JOB_BOARD_URL must be an http(s) URL, got "${boardUrl}"`);
     }
 
+    // Which CLI the runner speaks. An explicit enum, fatal on an unknown value: a typo must not
+    // read as claude-code and hand every prompt to a CLI that exits on "unknown flag" — the job
+    // would burn its attempts looking like a command that keeps failing.
+    const CLIS = ['claude-code', 'opencode'] as const;
+    const cliRaw = (env.RUNNER_CLI ?? '').trim() || 'claude-code';
+    if (!CLIS.includes(cliRaw as (typeof CLIS)[number])) {
+        throw new Error(`RUNNER_CLI must be one of ${CLIS.join(', ')}, got "${cliRaw}"`);
+    }
+    const cli = cliRaw as (typeof CLIS)[number];
+
+    // Two combinations that cannot work, refused at startup rather than discovered mid-job.
+    //
+    // Remote Control is claude-code's bridge: the tty, the login volume and the idle-parking loop
+    // all exist to serve a session drivable from claude.ai, and opencode has nothing that answers
+    // to `--remote-control`. And skip-permissions appends a claude-code flag; opencode takes its
+    // permissions from the opencode.json baked into its image, so the flag would be a no-op that
+    // reads as a decision made.
+    if (cli === 'opencode') {
+        if (flag(env.RUNNER_REMOTE_CONTROL)) {
+            throw new Error(
+                'RUNNER_REMOTE_CONTROL is not supported under RUNNER_CLI=opencode: Remote Control is ' +
+                    "claude-code's bridge, and opencode has nothing that answers to it. Only " +
+                    'RUNNER_CLI=claude-code can be driven.',
+            );
+        }
+        if (flag(env.RUNNER_SKIP_PERMISSIONS)) {
+            throw new Error(
+                'RUNNER_SKIP_PERMISSIONS is not supported under RUNNER_CLI=opencode: it appends a ' +
+                    'claude-code flag, and opencode takes its permissions from the opencode.json ' +
+                    'baked into its image.',
+            );
+        }
+    }
+
     const leaseSeconds = int(env.DRIVER_LEASE_SECONDS, 'DRIVER_LEASE_SECONDS', DEFAULTS.leaseSeconds, 10, 3600);
     const jobTimeoutMs = int(
         env.DRIVER_JOB_TIMEOUT_MS,
@@ -146,11 +211,51 @@ export function loadDriverConfig(env: NodeJS.ProcessEnv): DriverConfig {
         24 * 3600_000,
     );
 
+    // An explicit enum, like the server's GITHUB_MODE: a value this process does not know is fatal,
+    // never a fallback to docker — the first symptom of a fallback would be a driver that claims
+    // jobs and runs nothing, forever.
+    const EXECUTORS = ['docker', 'kubernetes'] as const;
+    const executorRaw = (env.EXECUTOR ?? '').trim() || 'docker';
+    if (!EXECUTORS.includes(executorRaw as (typeof EXECUTORS)[number])) {
+        throw new Error(`EXECUTOR must be one of ${EXECUTORS.join(', ')}, got "${executorRaw}"`);
+    }
+    const executor = executorRaw as (typeof EXECUTORS)[number];
+
+    const remoteControl = flag(env.RUNNER_REMOTE_CONTROL);
+    if (remoteControl && executor === 'kubernetes') {
+        throw new Error(
+            'RUNNER_REMOTE_CONTROL is not supported under EXECUTOR=kubernetes: it needs a tty, an auth ' +
+                'volume and an idle-parking loop that only the docker runner has. Run Remote Control ' +
+                'workloads on EXECUTOR=docker.',
+        );
+    }
+
+    // And the last impossible pair. The kubernetes runner speaks claude-code only — its Job spec is
+    // `--session-id`/`--resume` argv — while an opencode job arrives with no session at all.
+    // Allowed, the first claim would burn an attempt on the runner's own refusal, and the job would
+    // die looking like a command that keeps failing rather than like the configuration error it is.
+    if (cli === 'opencode' && executor === 'kubernetes') {
+        throw new Error(
+            'RUNNER_CLI=opencode is not supported under EXECUTOR=kubernetes: the kubernetes runner ' +
+                'runs every job as a claude-code session, and an opencode job carries none. Run ' +
+                'opencode runners on EXECUTOR=docker.',
+        );
+    }
+
+    // An explicit enum, like EXECUTOR: the API server would reject a bad policy only at job-create
+    // time, which is attempt-burning — the failure this whole loader exists to move to startup.
+    const PULL_POLICIES = ['Always', 'IfNotPresent', 'Never'] as const;
+    const pullPolicyRaw = (env.RUNNER_IMAGE_PULL_POLICY ?? '').trim() || 'IfNotPresent';
+    if (!PULL_POLICIES.includes(pullPolicyRaw as (typeof PULL_POLICIES)[number])) {
+        throw new Error(`RUNNER_IMAGE_PULL_POLICY must be one of ${PULL_POLICIES.join(', ')}, got "${pullPolicyRaw}"`);
+    }
+
     return {
         boardUrl,
         boardToken: (env.JOB_BOARD_TOKEN ?? '').trim(),
         worker: text(env.DRIVER_WORKER, 'DRIVER_WORKER', `driver-${process.pid}`),
-        image: text(env.EXECUTOR_IMAGE, 'EXECUTOR_IMAGE', DEFAULTS.image),
+        image: text(env.EXECUTOR_IMAGE, 'EXECUTOR_IMAGE', cli === 'opencode' ? 'opencode-executor' : DEFAULTS.image),
+        cli,
         workspaceVolume: text(env.WORKSPACE_VOLUME, 'WORKSPACE_VOLUME', DEFAULTS.workspaceVolume),
         workspaceMount: text(env.WORKSPACE_MOUNT, 'WORKSPACE_MOUNT', DEFAULTS.workspaceMount),
         network: (env.RUNNER_NETWORK ?? '').trim() || null,
@@ -159,12 +264,16 @@ export function loadDriverConfig(env: NodeJS.ProcessEnv): DriverConfig {
         leaseSeconds,
         jobTimeoutMs,
         skipPermissions: flag(env.RUNNER_SKIP_PERMISSIONS),
-        remoteControl: flag(env.RUNNER_REMOTE_CONTROL),
+        remoteControl,
         idleMs: int(env.RUNNER_IDLE_MS, 'RUNNER_IDLE_MS', DEFAULTS.idleMs, 1_000, 24 * 3600_000),
         authVolume: text(env.RUNNER_AUTH_VOLUME, 'RUNNER_AUTH_VOLUME', DEFAULTS.authVolume),
         passEnv: text(env.RUNNER_ENV, 'RUNNER_ENV', DEFAULTS.passEnv)
             .split(',')
             .map((name) => name.trim())
             .filter(Boolean),
+        executor,
+        k8sNamespace: text(env.K8S_NAMESPACE, 'K8S_NAMESPACE', 'default'),
+        credentialsSecret: (env.RUNNER_CREDENTIALS_SECRET ?? '').trim() || null,
+        imagePullPolicy: pullPolicyRaw as (typeof PULL_POLICIES)[number],
     };
 }

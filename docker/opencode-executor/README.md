@@ -1,0 +1,97 @@
+# opencode-executor
+
+opencode in a container, with a fixed configuration baked in. It runs an agent against a mounted
+checkout; it does not build or run this repo's application.
+
+Headless only. The driver selects it with `RUNNER_CLI=opencode`, and that combination refuses
+`RUNNER_REMOTE_CONTROL` and `RUNNER_SKIP_PERMISSIONS` at startup — Remote Control is claude-code's
+bridge, and opencode takes its permissions from the config baked into this image, not from a CLI
+flag.
+
+## Layout
+
+| Path | Becomes |
+| --- | --- |
+| `Dockerfile` | the image — Node 24 (debian), `opencode-ai` (pinned), `gh`, `acli`, OTEL env |
+| `entrypoint.sh` | `/usr/local/bin/opencode-executor` — the `ENTRYPOINT` |
+| `test.sh` | builds the image and smoke-tests it — not shipped inside it |
+| `opencode-home/opencode.json` | the baked permission policy, at `OPENCODE_CONFIG` |
+| `opencode-home/AGENTS.md` | the global instructions every run loads |
+
+## Build
+
+```bash
+docker build -t opencode-executor docker/opencode-executor
+
+# Pin the CLI instead of tracking latest:
+docker build --build-arg OPENCODE_VERSION=1.18.29 -t opencode-executor docker/opencode-executor
+```
+
+The build context is this directory, not the repo root.
+
+## Test
+
+```bash
+docker/opencode-executor/test.sh
+```
+
+Builds the image as `opencode-executor-test` and runs a handful of checks: the CLI answers with the
+pinned version, the baked `opencode.json` parses and carries exactly the expected permission block,
+the `$WORKDIR` contract holds (a missing directory exits `2`), and no credential is baked into the
+image. It is deliberately shallower than `docker/claude-executor/test.sh`; deepen it the first time
+something surprises us.
+
+## Run
+
+Credentials never enter the image; they arrive as environment at run time. Under the driver, that
+is `RUNNER_ENV`'s job — its default already forwards `ANTHROPIC_API_KEY`, which opencode reads as a
+provider key. `CLAUDE_CODE_OAUTH_TOKEN` means nothing to opencode and is forwarded harmlessly.
+
+Measured, and worth knowing before relying on it: **opencode answers prompts with no key at all**,
+through its own anonymous free tier. A credential-less run is not a failure the way it is for
+claude-code — the key is what unlocks your providers and models. `test.sh` therefore asserts the
+absence of credential *material* in the image (env and auth files), not a failure without one.
+
+```bash
+docker run --rm \
+    -e ANTHROPIC_API_KEY \
+    -v "$PWD:/workspace" \
+    opencode-executor run 'summarise the diff on this branch'
+```
+
+The command is the CLI's headless form: `run <prompt>`. There is no session flag on purpose —
+`opencode run --session <id>` continues a session opencode itself created; it cannot adopt one
+minted in advance, so the driver mints and reports nothing for these jobs and the board carries no
+session id for them.
+
+## Permissions are baked, not flagged
+
+`opencode-home/opencode.json` holds the permission policy, because opencode reads policy from
+config and `ask` is unusable headless — a run that stops to ask hangs until its deadline. The baked
+policy is the executor spec's acceptEdits mapping:
+
+| Permission | Value |
+| --- | --- |
+| `edit` | `allow` |
+| `bash` | `allow` |
+| `webfetch` | `deny` |
+
+To run another policy, mount your own over the baked file:
+`-v "$HOME/opencode.json:/home/node/.config/opencode/opencode.json:ro"` — it resolves outside
+`/workspace`, so nothing config-shaped enters the checkout's diff.
+
+## Session ids
+
+opencode mints its own session ids (`ses_…`) and stores them under its data directory. The driver
+does not read them back out: minting a uuid and reporting it would put a session on the board that
+the runner never used, which is a lie the claude path never has to tell because its CLI accepts an
+id as input. A job run by this image shows no session link; its token spend still reaches the
+telemetry pipeline under opencode's own metric names.
+
+## Telemetry
+
+`OTEL_EXPORTER_OTLP_ENDPOINT` points at `http://collector:4318` — the `collector` service in this
+repo's `docker-compose.yml`, resolvable only from that compose network. Off that network the
+exporter fails to connect; the CLI still works, the runs just go unrecorded. Unlike claude-code's,
+this OTEL surface is not exhaustively verified — if a run's metrics do not arrive, check these
+variables first.

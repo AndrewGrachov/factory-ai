@@ -270,6 +270,19 @@ flatten it.
 **`order by created_at, id`.** `now()` is transaction-constant, so a batch insert shares a
 timestamp and FIFO without the id tiebreaker is arbitrary.
 
+**`repo` and `executor` are grouping metadata for the tasks chat, not execution inputs.** The chat
+gives each repository workspace its own thread and names the executor a task was queued with, so a
+job carries both labels — nullable, because every job queued before the chat has neither, and 014
+adds them as plain text for the same reason `remote_session_id` is. No foreign keys: `job` is an
+audit record (the `created_by` precedent — "records who did rather than limiting what they may do"),
+while `user_repo` and `user_executor` rows are member state that comes and goes with a PUT, and a
+deselected repository must not take its history with it. Shape-validated only, under the same
+path-segment rules a checkout's name obeys, because nothing consumes either label: the claim payload
+is unchanged, and a wrong-but-well-formed label in a hand-written API call is as harmless as a
+typo'd command. Wiring an executor into the driver remains future work — that change will decide
+what an executor name means to a worker, and whether existence is then checked at create or at
+claim. "Nothing runs an executor yet" stays true.
+
 ## Deliberately absent
 
 - **No idempotency key on create.** A `POST /api/jobs` that times out and is retried creates a

@@ -145,7 +145,9 @@ true: the Workspace page reports each checkout's branch, newest commit and size 
 
 The page also shows the member's configured executors, below the repositories. This is
 **configuration storage only**: a row is the JSON a member pasted into the add dialog, and nothing
-runs an executor yet — wiring one into the driver is future work.
+runs an executor yet — wiring one into the driver is future work. The Tasks page lets a member
+stamp one of these names onto a job they queue — metadata the tasks chat displays, never checked
+against this list — and still nothing runs.
 
 - **The dialog is add-only, and validation is structural.** The contract is "raw JSON the member
   pastes"; the server checks it is an object with a known type, unique path-segment-safe names, at

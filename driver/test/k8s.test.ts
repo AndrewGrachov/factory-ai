@@ -93,6 +93,17 @@ describe('the runner job spec', () => {
         }
     });
 
+    // The id becomes the Job object's name and lands in API paths — the same interpolation the
+    // docker runner guards before a `docker run`, from the same kind of board.
+    it('refuses a job id that is not a uuid, rather than interpolating it', () => {
+        expect(() =>
+            runnerJobSpec(loadDriverConfig({ EXECUTOR: 'kubernetes' }), { ...job, id: '../../etc/passwd' }, {
+                id: SESSION,
+                resume: false,
+            }),
+        ).toThrow(/must be a uuid/);
+    });
+
     // The k8s form of `-e NAME`: the NAMES travel and the values live in a Secret the cluster
     // already holds. A literal `value:` would put the credential in the pod spec, which anyone who
     // can `get pods` can read — the same audience every `ps` on the host has.
@@ -400,14 +411,14 @@ describe('the kubernetes runner', () => {
         expect(gets).toBe(POLL_MAX_CONSECUTIVE_FAILURES + 1);
     });
 
-    // Two outages of 100 reads each would trip the bound if the count carried across them — it
+    // Two outages of 10 reads each would trip the bound if the count carried across them — it
     // must not. One good read in between proves the job is alive and observable again.
     it('recounts after a good read, so separate outages do not add up', async () => {
         const outage = (): K8sResponse => ({ status: 503, body: 'unavailable' });
         const script: K8sResponse[] = [
-            ...Array.from({ length: 100 }, outage),
+            ...Array.from({ length: 10 }, outage),
             { status: 200, body: JSON.stringify({ status: {} }) },
-            ...Array.from({ length: 100 }, outage),
+            ...Array.from({ length: 10 }, outage),
             FAKE.job as K8sResponse,
         ];
         let served = 0;
@@ -428,7 +439,7 @@ describe('the kubernetes runner', () => {
         const outcome = await runner(request).run(job, { id: SESSION, resume: false });
 
         expect(outcome.exitCode).toBe(0);
-        expect(served).toBe(202);
+        expect(served).toBe(22);
     });
 
     it('answers a null exit code when the pod list comes back empty', async () => {
@@ -487,6 +498,54 @@ describe('the kubernetes runner', () => {
     it('leaves a job to its lease when the job cannot be created', async () => {
         const { request } = fakeRequest({ create: { status: 500, body: 'nope' } });
         await expect(runner(request).run(job, { id: SESSION, resume: false })).rejects.toThrow(/500/);
+    });
+
+    it('keeps polling the pod list through transient API failures', async () => {
+        let lists = 0;
+        const request: K8sRequest = (method, path) => {
+            if (method === 'POST' && path === jobsPath(namespace)) {
+                return Promise.resolve({ status: 201, body: '{}' });
+            }
+            if (path === jobPath(namespace, containerName(job))) {
+                return Promise.resolve(FAKE.job as K8sResponse);
+            }
+            if (path.startsWith(`/api/v1/namespaces/${namespace}/pods?`)) {
+                lists += 1;
+                // A 503 during an apiserver upgrade is not the run's verdict; the exit code is
+                // still out there. The third read succeeds.
+                return Promise.resolve(
+                    lists <= 2 ? { status: 503, body: 'unavailable' } : (FAKE.pods as K8sResponse),
+                );
+            }
+            if (path.includes('/log')) return Promise.resolve(FAKE.log as K8sResponse);
+            return Promise.reject(new Error(`the fake has no answer for ${method} ${path}`));
+        };
+
+        const outcome = await runner(request).run(job, { id: SESSION, resume: false });
+        expect(outcome.exitCode).toBe(0);
+        expect(lists).toBe(3);
+    });
+
+    // A log read that fails outright — connection reset, pod gone — must not fail the report: the
+    // exit code already carries the verdict, and re-running finished work is the worse outcome.
+    it('keeps the verdict when the log read fails outright', async () => {
+        const request: K8sRequest = (method, path) => {
+            if (method === 'POST' && path === jobsPath(namespace)) {
+                return Promise.resolve({ status: 201, body: '{}' });
+            }
+            if (path === jobPath(namespace, containerName(job))) {
+                return Promise.resolve(FAKE.job as K8sResponse);
+            }
+            if (path.startsWith(`/api/v1/namespaces/${namespace}/pods?`)) {
+                return Promise.resolve(FAKE.pods as K8sResponse);
+            }
+            if (path.includes('/log')) return Promise.reject(new Error('connection reset'));
+            return Promise.reject(new Error(`the fake has no answer for ${method} ${path}`));
+        };
+
+        const outcome = await runner(request).run(job, { id: SESSION, resume: false });
+        expect(outcome.exitCode).toBe(0);
+        expect(outcome.output).toBe('');
     });
 
     it('kill deletes the job and tolerates it already being gone', async () => {

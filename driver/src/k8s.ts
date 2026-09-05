@@ -73,12 +73,15 @@ const TTL_SECONDS = 3_600;
 const POLL_MS = 2_000;
 
 /**
- * Consecutive failed reads of the Job object before the run is abandoned to its lease — about five
- * minutes at POLL_MS. The kubelet's deadline guarantees the JOB reaches a terminal state, but not
- * that this driver can keep READING it; an apiserver that answers 503 for an hour would otherwise
- * hold the worker slot forever, heartbeating a lease for a run nobody can observe.
+ * Consecutive failed reads before the run is abandoned to its lease. About half a minute when the
+ * API server answers fast, up to a few minutes when each attempt hangs out its request timeout —
+ * enough to ride out an upgrade or a dropped connection, short enough that a half-dead API server
+ * hands the job back to its lease instead of holding a worker slot for an hour. The kubelet's
+ * deadline guarantees the JOB reaches a terminal state, but not that this driver can keep READING
+ * it; an apiserver that answers 503 forever would otherwise renew a lease around a run nobody can
+ * observe.
  */
-export const POLL_MAX_CONSECUTIVE_FAILURES = 150;
+export const POLL_MAX_CONSECUTIVE_FAILURES = 15;
 
 /**
  * How long create() will wait for a deleted leftover Job to actually vanish — about five minutes
@@ -108,6 +111,11 @@ const LOG_TAIL_LINES = 1_000;
  * because the API server changing the runtime does not change who is trusted with what.
  */
 export function runnerJobSpec(config: DriverConfig, job: BoardJob, session: RunSession): RunnerJobSpec {
+    // The id becomes the Job object's name; assert it before it lands in the spec, the same way
+    // the workspace path is asserted before it becomes a working directory.
+    if (!JOB_ID.test(job.id)) {
+        throw new Error(`refusing to run job ${job.id}: a job id must be a uuid`);
+    }
     const path = workspacePathOf(job);
     if (!path) {
         throw new Error(
@@ -216,13 +224,10 @@ export type K8sRequest = (method: K8sMethod, path: string, body?: unknown) => Pr
 const SERVICE_ACCOUNT_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
 
 /**
- * The real transport: the API server the pod's own environment points at, with the ServiceAccount
- * token and cluster CA read per call — the token is rotated under the driver, and a credential read
- * once at startup outlives its welcome.
- *
- * Built only for a driver running IN a cluster; `KUBERNETES_SERVICE_HOST` missing is a fatal at
- * startup rather than a first-claim failure, which is why this is a separate function and not
- * folded into the runner.
+ * The real transport: the API server the pod's own environment points at. Built only for a driver
+ * running IN a cluster; everything that can fail is made to fail at construction rather than on the
+ * first claim — `KUBERNETES_SERVICE_HOST` missing, or a ServiceAccount volume not mounted, are
+ * startup errors, not mid-run surprises.
  */
 export function inClusterRequest(): K8sRequest {
     const host = process.env.KUBERNETES_SERVICE_HOST;
@@ -233,6 +238,9 @@ export function inClusterRequest(): K8sRequest {
                 'EXECUTOR=kubernetes needs an in-cluster driver — run it in the cluster it serves.',
         );
     }
+    // Read once: the CA does not rotate, and reading it here is what makes a pod without its
+    // projected ServiceAccount volume fail at startup instead of on every claim.
+    const ca = readFileSync(`${SERVICE_ACCOUNT_DIR}/ca.crt`, 'utf8');
 
     return (method, path, body) =>
         new Promise<K8sResponse>((resolve, reject) => {
@@ -242,7 +250,7 @@ export function inClusterRequest(): K8sRequest {
                     port: Number(port),
                     method,
                     path,
-                    ca: readFileSync(`${SERVICE_ACCOUNT_DIR}/ca.crt`, 'utf8'),
+                    ca,
                     timeout: REQUEST_TIMEOUT_MS,
                     headers: {
                         // Read per call: a rotated ServiceAccount token must not be remembered.
@@ -255,6 +263,10 @@ export function inClusterRequest(): K8sRequest {
                     res.setEncoding('utf8');
                     res.on('data', (chunk: string) => {
                         text += chunk;
+                        // Only the tail survives OUTPUT_LIMIT downstream, so buffering a
+                        // multi-megabyte single log line whole would be exactly the unbounded
+                        // string the docker runner's cap exists to avoid. Keep a sliding tail.
+                        if (text.length > 4 * OUTPUT_LIMIT) text = text.slice(-2 * OUTPUT_LIMIT);
                     });
                     res.on('end', () => resolve({ status: res.statusCode ?? 0, body: text }));
                 },
@@ -271,6 +283,12 @@ export function inClusterRequest(): K8sRequest {
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * A uuid, and nothing else — asserted before `job.id` is interpolated into an API path or a pod
+ * name. Copied from docker.ts:40, which re-asserts the same ids for the same reason.
+ */
+const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface K8sJobStatus {
     succeeded?: number;
@@ -300,7 +318,15 @@ export function createKubernetesRunner(
     request: K8sRequest,
     sleep: (ms: number) => Promise<void> = wait,
 ): Runner {
-    const name = (job: BoardJob): string => containerName(job);
+    const name = (job: BoardJob): string => {
+        // The board is not something this process trusts with a fragment of a path — and job.id
+        // lands in API paths here the way workspacePath lands in a command line. Copied from
+        // docker.ts, which asserts the same thing before a `docker run`.
+        if (!JOB_ID.test(job.id)) {
+            throw new Error(`refusing to address a job id that is not a uuid: ${job.id}`);
+        }
+        return containerName(job);
+    };
 
     const create = async (job: BoardJob, spec: RunnerJobSpec): Promise<void> => {
         const post = async (): Promise<K8sResponse> => request('POST', jobsPath(config.k8sNamespace), spec);
@@ -352,6 +378,33 @@ export function createKubernetesRunner(
             throw new Error(
                 `creating the runner job answered ${response.status}: ${response.body.slice(0, 200)}`,
             );
+        }
+    };
+
+    /**
+     * One GET with the same bounded patience the status poll has. Used for the reads that carry
+     * the run's verdict once it has finished: the pod list (exit code) and the log (output).
+     * An apiserver answering 503 for a moment is not this run's verdict — reporting a failure
+     * here would blame the command for the API server's problem and re-run finished work.
+     */
+    const readVerdict = async (path: string, what: string): Promise<K8sResponse> => {
+        let failures = 0;
+        for (;;) {
+            let response: K8sResponse;
+            try {
+                response = await request('GET', path);
+            } catch (e) {
+                if (++failures > POLL_MAX_CONSECUTIVE_FAILURES) throw e;
+                await sleep(POLL_MS);
+                continue;
+            }
+            if (response.status !== 429 && response.status < 500) return response;
+            if (++failures > POLL_MAX_CONSECUTIVE_FAILURES) {
+                throw new Error(
+                    `${what} answered ${response.status} ${POLL_MAX_CONSECUTIVE_FAILURES} times in a row`,
+                );
+            }
+            await sleep(POLL_MS);
         }
     };
 
@@ -432,11 +485,11 @@ export function createKubernetesRunner(
 
             // The pod carries the exit code; the Job object does not. Found by the label the Job
             // controller stamps on every pod it owns, not by guessing the generated name.
-            const podsResponse = await request(
-                'GET',
+            const podsResponse = await readVerdict(
                 `/api/v1/namespaces/${config.k8sNamespace}/pods?labelSelector=${encodeURIComponent(
                     `job-name=${name(job)}`,
                 )}`,
+                'listing the runner pods',
             );
             if (podsResponse.status >= 300) {
                 throw new Error(
@@ -456,13 +509,20 @@ export function createKubernetesRunner(
             if (pod?.metadata?.name) {
                 // The tail, not the transcript: a run that fails says why at the end, and the head
                 // is banner — bounded in lines by tailLines and in bytes by OUTPUT_LIMIT, because
-                // the board refuses a complete POST that does not fit. A log read that fails does
-                // not change the verdict: the exit code already carries it, and reporting empty
-                // output beats re-running finished work over one missing log.
-                const log = await request(
-                    'GET',
-                    `/api/v1/namespaces/${config.k8sNamespace}/pods/${pod.metadata.name}/log?tailLines=${LOG_TAIL_LINES}`,
-                );
+                // the board refuses a complete POST that does not fit. A log read that fails —
+                // status or transport — does not change the verdict: the exit code already carries
+                // it, and reporting empty output beats re-running finished work over one missing
+                // log. No retries here at all: the pod may be gone for good, and the answer is
+                // already known to be "whatever we can get".
+                let log: K8sResponse;
+                try {
+                    log = await request(
+                        'GET',
+                        `/api/v1/namespaces/${config.k8sNamespace}/pods/${pod.metadata.name}/log?tailLines=${LOG_TAIL_LINES}`,
+                    );
+                } catch {
+                    log = { status: 0, body: '' };
+                }
                 if (log.status < 300) output = log.body.slice(-OUTPUT_LIMIT);
             }
 

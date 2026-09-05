@@ -19,6 +19,10 @@ export interface RunOutcome {
 /**
  * The session a run is to use. `resume` restores an existing one rather than starting it, which is
  * how a parked job picks up where it left off — under the same id, so its link does not move.
+ *
+ * Null for a runner that takes no session at all: opencode mints its own ids and cannot adopt one
+ * (`run --session <id>` continues an existing session, it never creates one with a given id), so
+ * there is nothing honest to pass it.
  */
 export interface RunSession {
     id: string;
@@ -26,7 +30,7 @@ export interface RunSession {
 }
 
 export interface Runner {
-    run(job: BoardJob, session: RunSession): Promise<RunOutcome>;
+    run(job: BoardJob, session: RunSession | null): Promise<RunOutcome>;
     /**
      * The Remote Control id the Claude UI addresses this session by, or null while the bridge has
      * not connected yet — which is the ordinary answer for the first few seconds of a run, and the
@@ -92,8 +96,12 @@ export function parseRemoteSessionId(line: string): string | null {
     }
 }
 
-/** The board truncates too; this is about not holding an unbounded string in memory first. */
-const OUTPUT_LIMIT = 64 * 1024;
+/**
+ * The board truncates too; this is about not holding an unbounded string in memory first — and,
+ * since the board's body limit is 128 KiB, about a runner's report ALWAYS fitting in a complete
+ * POST. Exported because the kubernetes runner is bound by the same board.
+ */
+export const OUTPUT_LIMIT = 64 * 1024;
 
 export const containerName = (job: BoardJob): string => `factory-job-${job.id}`;
 
@@ -130,7 +138,7 @@ function workspacePath(job: BoardJob): string {
     return path;
 }
 
-export function dockerArgs(config: DriverConfig, job: BoardJob, session: RunSession): string[] {
+export function dockerArgs(config: DriverConfig, job: BoardJob, session: RunSession | null): string[] {
     const args = [
         'run',
         '--rm',
@@ -178,6 +186,21 @@ export function dockerArgs(config: DriverConfig, job: BoardJob, session: RunSess
     }
 
     if (config.network) args.push('--network', config.network);
+
+    // opencode: headless only — Remote Control is refused in the config, so there is no RC branch
+    // here and no permissions flag either (the image's baked opencode.json decides them). And no
+    // session: opencode cannot adopt an id minted in advance, `run --session <id>` only continues
+    // one it created. A resume arriving here means board state from before a RUNNER_CLI flip, and
+    // a silent wrong run is worse than a throw.
+    if (config.cli === 'opencode') {
+        if (session) throw new Error(`refusing to run job ${job.id}: the opencode runner cannot adopt a session`);
+        args.push(config.image, 'run', job.command);
+        return args;
+    }
+
+    if (!session) {
+        throw new Error(`refusing to run job ${job.id}: the claude-code runner runs every job as a session`);
+    }
 
     // Restoring a session versus starting one. `--resume` keeps the original id — forking it is a
     // separate flag — which is what makes a parked job's link survive being parked.

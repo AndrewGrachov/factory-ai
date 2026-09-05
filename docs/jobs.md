@@ -3,8 +3,9 @@
 Read before: touching `server/src/routes/jobs.ts`, `server/src/db/job-store.ts`,
 `server/migrations/006_jobs.sql` or anything under `driver/`.
 
-A job is a text command waiting for a worker — read as a Claude prompt, since the runner's
-`ENTRYPOINT` is the `claude` wrapper and the driver passes the command as `-p <command>`.
+A job is a text command waiting for a worker — read as an agent prompt. The runner's `ENTRYPOINT`
+is a CLI wrapper: the driver passes the command as `-p <command>` to claude-code, or as the
+positional prompt of `opencode run` under `RUNNER_CLI=opencode`.
 
 **The server hands jobs out and records results. It never spawns anything.** The driver claims a
 job, runs it in a `claude-executor` container against the AUTHOR's workspace checkout, and reports
@@ -37,8 +38,9 @@ A fourth workspace, with no dependency on `core` and none at run time at all. It
 HTTP board, never of the database — which is what lets it run anywhere the board is reachable.
 
 ```bash
-docker build -t claude-executor docker/claude-executor   # the runner image, once
-npm run driver                                           # against a board on 127.0.0.1:8080
+docker build -t claude-executor docker/claude-executor     # the claude-code runner image, once
+docker build -t opencode-executor docker/opencode-executor # the opencode runner image, once
+npm run driver                                             # against a board on 127.0.0.1:8080
 
 docker compose --profile driver up -d driver             # or in the stack
 ```
@@ -47,7 +49,8 @@ docker compose --profile driver up -d driver             # or in the stack
 | --- | --- | --- |
 | `JOB_BOARD_URL` | `http://127.0.0.1:8080` | Must be http(s); the scheme is checked, because `new URL('dashboard:8080')` parses. |
 | `JOB_BOARD_TOKEN` | unset | The worker token, from `npm run worker-token -- --name <worker>`. Required against a board running `AUTH_MODE=github`; unset against an open one, where the header is **omitted rather than sent empty** — an empty Bearer is a credential that failed, not one that was never offered. It is also how the board knows which organization this driver works for. |
-| `EXECUTOR_IMAGE` | `claude-executor` | |
+| `RUNNER_CLI` | `claude-code` | Which CLI the runner image speaks: `claude-code` or `opencode`. Fatal on anything else. `opencode` is headless only — `RUNNER_REMOTE_CONTROL` and `RUNNER_SKIP_PERMISSIONS` are refused under it at startup. |
+| `EXECUTOR_IMAGE` | `claude-executor`, or `opencode-executor` under `RUNNER_CLI=opencode` | An explicit value always wins. |
 | `WORKSPACE_VOLUME` | `factory-ai_workspaces` | A volume **name**, not a host path — see below. |
 | `RUNNER_NETWORK` | unset | Join the compose network or the runner's telemetry reaches nothing. |
 | `DRIVER_CONCURRENCY` | `2` | |
@@ -101,6 +104,20 @@ visible in `attempts`.
 of the lease — 100s by default — and awaiting it before reporting left every finished job sitting
 in `running` for a minute and a half. Found by running the driver for real; a unit test with an
 instant fake clock cannot see it, so `loop.test.ts` models a period that never elapses.
+
+**`RUNNER_CLI=opencode` swaps the CLI behind the image, and with it the session contract.** The
+headless form becomes `run <command>`, and no session is minted, passed or reported: opencode
+mints its own ids and cannot adopt one — `run --session <id>` continues a session opencode
+created, it never creates one with a given id — so minting a uuid anyway would put a session on
+the board that the runner never used. These jobs show no session link; their token spend still
+reaches the telemetry pipeline under opencode's own metric names. The combination is refused at
+startup with `RUNNER_REMOTE_CONTROL` (that is claude-code's bridge) and with
+`RUNNER_SKIP_PERMISSIONS` (that appends a claude-code flag; opencode's permissions come from the
+`opencode.json` baked into its image — see [its README](../docker/opencode-executor/README.md)).
+A parked job claimed by an opencode driver is failed with a reason rather than restored: standby
+is a Remote Control feature, so a claim carrying `resumeSessionId` under opencode means the
+operator flipped `RUNNER_CLI` while something was parked, and re-running that command would
+re-enter a transcript somebody may have been driving by hand.
 
 ## The session ids, and driving a job from the Claude UI
 

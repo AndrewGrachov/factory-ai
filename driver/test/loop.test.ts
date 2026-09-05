@@ -77,7 +77,7 @@ function stubBoard(
 }
 
 function stubRunner(
-    outcome: (job: BoardJob, session: RunSession) => Promise<RunOutcome>,
+    outcome: (job: BoardJob, session: RunSession | null) => Promise<RunOutcome>,
     remote: string | null = null,
 ): Runner & { killed: string[]; lookups: number } {
     const runner = {
@@ -242,6 +242,7 @@ describe('the poll loop', () => {
         let given = '';
         let reportedFirst = false;
         const runner = stubRunner(async (_job, session) => {
+            if (!session) throw new Error('a claude-code run always has a session');
             given = session.id;
             reportedFirst = board.board.sessions.length === 1;
             return ok();
@@ -338,5 +339,46 @@ describe('the poll loop', () => {
         await drive({ ...board, runner });
 
         expect(board.board.completed).toHaveLength(2);
+    });
+});
+
+describe('an opencode runner', () => {
+    // opencode mints its own session ids and cannot adopt one (acceptsSessionId: false). Minting a
+    // uuid here and reporting it would put a session on the board that the runner never used — so
+    // the honest answer is no session at all.
+    it('runs headless: no session is minted, reported or given', async () => {
+        const board = stubBoard([job(1)]);
+        let given: RunSession | null | undefined;
+        const runner = stubRunner(async (_job, session) => {
+            given = session;
+            return ok();
+        });
+
+        await drive({ ...board, runner }, { RUNNER_CLI: 'opencode' });
+
+        expect(given).toBeNull();
+        expect(board.board.sessions).toEqual([]);
+        expect(board.board.completed).toEqual([
+            { id: job(1).id, status: 'succeeded', exitCode: 0, output: 'done' },
+        ]);
+    });
+
+    // A claim carrying resumeSessionId under opencode can only be board state from before a
+    // RUNNER_CLI flip: standby is a Remote Control feature, and opencode refuses Remote Control at
+    // startup. Failing it with a reason beats restoring a session the runner cannot adopt — or
+    // re-running the command into a transcript somebody has been driving by hand.
+    it('fails a job it cannot resume, with a reason, without running it', async () => {
+        const board = stubBoard([job(1, '44444444-4444-4444-8444-444444444444')]);
+        let ran = 0;
+        const runner = stubRunner(async () => {
+            ran += 1;
+            return ok();
+        });
+
+        await drive({ ...board, runner }, { RUNNER_CLI: 'opencode' });
+
+        expect(ran).toBe(0);
+        expect(board.board.completed[0]).toMatchObject({ status: 'failed', exitCode: null });
+        expect(board.board.completed[0]?.output).toContain('opencode');
     });
 });

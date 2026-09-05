@@ -29,6 +29,13 @@ export interface DriverConfig {
      */
     image: string;
     /**
+     * Which CLI the runner image speaks: claude-code's `--session-id <uuid>` / `-p <prompt>` form,
+     * or opencode's headless `run <prompt>` form. The union is COPIED, not imported from core's
+     * EXECUTOR_TYPES: this package depends on nothing, deliberately (see AGENTS.md), and one string
+     * union does not change that.
+     */
+    cli: 'claude-code' | 'opencode';
+    /**
      * The docker volume holding the checkouts — a NAME, not a host path. The dashboard writes them
      * into a named volume precisely so no host directory is involved, and a runner spawned from
      * inside a container could not resolve a host path anyway.
@@ -137,6 +144,40 @@ export function loadDriverConfig(env: NodeJS.ProcessEnv): DriverConfig {
         throw new Error(`JOB_BOARD_URL must be an http(s) URL, got "${boardUrl}"`);
     }
 
+    // Which CLI the runner speaks. An explicit enum, fatal on an unknown value: a typo must not
+    // read as claude-code and hand every prompt to a CLI that exits on "unknown flag" — the job
+    // would burn its attempts looking like a command that keeps failing.
+    const CLIS = ['claude-code', 'opencode'] as const;
+    const cliRaw = (env.RUNNER_CLI ?? '').trim() || 'claude-code';
+    if (!CLIS.includes(cliRaw as (typeof CLIS)[number])) {
+        throw new Error(`RUNNER_CLI must be one of ${CLIS.join(', ')}, got "${cliRaw}"`);
+    }
+    const cli = cliRaw as (typeof CLIS)[number];
+
+    // Two combinations that cannot work, refused at startup rather than discovered mid-job.
+    //
+    // Remote Control is claude-code's bridge: the tty, the login volume and the idle-parking loop
+    // all exist to serve a session drivable from claude.ai, and opencode has nothing that answers
+    // to `--remote-control`. And skip-permissions appends a claude-code flag; opencode takes its
+    // permissions from the opencode.json baked into its image, so the flag would be a no-op that
+    // reads as a decision made.
+    if (cli === 'opencode') {
+        if (flag(env.RUNNER_REMOTE_CONTROL)) {
+            throw new Error(
+                'RUNNER_REMOTE_CONTROL is not supported under RUNNER_CLI=opencode: Remote Control is ' +
+                    "claude-code's bridge, and opencode has nothing that answers to it. Only " +
+                    'RUNNER_CLI=claude-code can be driven.',
+            );
+        }
+        if (flag(env.RUNNER_SKIP_PERMISSIONS)) {
+            throw new Error(
+                'RUNNER_SKIP_PERMISSIONS is not supported under RUNNER_CLI=opencode: it appends a ' +
+                    'claude-code flag, and opencode takes its permissions from the opencode.json ' +
+                    'baked into its image.',
+            );
+        }
+    }
+
     const leaseSeconds = int(env.DRIVER_LEASE_SECONDS, 'DRIVER_LEASE_SECONDS', DEFAULTS.leaseSeconds, 10, 3600);
     const jobTimeoutMs = int(
         env.DRIVER_JOB_TIMEOUT_MS,
@@ -150,7 +191,8 @@ export function loadDriverConfig(env: NodeJS.ProcessEnv): DriverConfig {
         boardUrl,
         boardToken: (env.JOB_BOARD_TOKEN ?? '').trim(),
         worker: text(env.DRIVER_WORKER, 'DRIVER_WORKER', `driver-${process.pid}`),
-        image: text(env.EXECUTOR_IMAGE, 'EXECUTOR_IMAGE', DEFAULTS.image),
+        image: text(env.EXECUTOR_IMAGE, 'EXECUTOR_IMAGE', cli === 'opencode' ? 'opencode-executor' : DEFAULTS.image),
+        cli,
         workspaceVolume: text(env.WORKSPACE_VOLUME, 'WORKSPACE_VOLUME', DEFAULTS.workspaceVolume),
         workspaceMount: text(env.WORKSPACE_MOUNT, 'WORKSPACE_MOUNT', DEFAULTS.workspaceMount),
         network: (env.RUNNER_NETWORK ?? '').trim() || null,

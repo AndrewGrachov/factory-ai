@@ -19,7 +19,8 @@ POST /api/jobs/claim {worker}   -> 200 {id, command, leaseToken, leaseExpiresAt,
                                         userId, workspacePath, resumeSessionId} | 204
   every request carries `authorization: Bearer $JOB_BOARD_TOKEN`, when the board requires one
   resumeSessionId ? restore that session : mint one, POST /api/jobs/:id/session
-  spawn claude-executor with the command, as that session
+  spawn the runner with the command, as that session
+  (claude-code mints and reports a session uuid; opencode does neither — see below)
   POST /api/jobs/:id/heartbeat {leaseToken}     every leaseSeconds/3, while it runs
 POST /api/jobs/:id/complete {leaseToken, status, exitCode, output}
   ... or, if the runner went quiet:
@@ -109,9 +110,10 @@ instant fake clock cannot see it, so `loop.test.ts` models a period that never e
 headless form becomes `run <command>`, and no session is minted, passed or reported: opencode
 mints its own ids and cannot adopt one — `run --session <id>` continues a session opencode
 created, it never creates one with a given id — so minting a uuid anyway would put a session on
-the board that the runner never used. These jobs show no session link; their token spend still
-reaches the telemetry pipeline under opencode's own metric names. The combination is refused at
-startup with `RUNNER_REMOTE_CONTROL` (that is claude-code's bridge) and with
+the board that the runner never used. These jobs show no session link. Their runs still emit OTLP,
+but the server's metric map carries no opencode rows yet, so spend records as an unmapped agent —
+null, never zero — until those rows are added (see [limits.md](limits.md)). The combination is
+refused at startup with `RUNNER_REMOTE_CONTROL` (that is claude-code's bridge) and with
 `RUNNER_SKIP_PERMISSIONS` (that appends a claude-code flag; opencode's permissions come from the
 `opencode.json` baked into its image — see [its README](../docker/opencode-executor/README.md)).
 A parked job claimed by an opencode driver is failed with a reason rather than restored: standby
@@ -129,7 +131,7 @@ re-enter a transcript somebody may have been driving by hand.
 | Comes from | the driver, which mints it | Anthropic's backend, when the bridge connects |
 | Known | before the container starts | seconds into the run, or never |
 | Good for | joining a job to its telemetry | `https://claude.ai/code/<id>` |
-| Headless jobs | always | never — a `-p` run registers no bridge |
+| Headless jobs | always, under claude-code; under opencode, none — it mints its own and the driver never sees one | never — a `-p` run registers no bridge |
 
 The link is built from the **remote** one. Using the local uuid gives a dead URL, which is an easy
 mistake to make and a hard one to notice: both are called "the session id", both are present, and

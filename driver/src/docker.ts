@@ -97,11 +97,9 @@ export function parseRemoteSessionId(line: string): string | null {
 }
 
 /**
- * The board truncates too; this is about not holding an unbounded string in memory first — and,
- * since the board's body limit is 128 KiB, about a runner's report ALWAYS fitting in a complete
- * POST. Exported because the kubernetes runner is bound by the same board.
+ * The board truncates too; this is about not holding an unbounded string in memory first.
  */
-export const OUTPUT_LIMIT = 64 * 1024;
+const OUTPUT_LIMIT = 64 * 1024;
 
 export const containerName = (job: BoardJob): string => `factory-job-${job.id}`;
 

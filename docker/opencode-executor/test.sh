@@ -66,6 +66,15 @@ expect_exact 'webfetch is denied' "$policy" webfetch deny
 docker run --rm -e WORKDIR=/nope "$IMAGE" run 'hi' >/dev/null 2>&1
 if [ "$?" = "2" ]; then ok 'a missing WORKDIR exits 2'; else bad 'a missing WORKDIR exits 2' 'see above'; fi
 
+# The driver's exact argv shape, through the wrapper: `run <prompt>`. Relies on opencode's
+# anonymous free tier, since no credential is baked (checked above) — bounded by timeout so a
+# network-less environment fails loudly instead of hanging.
+out="$(timeout 120 docker run --rm "$IMAGE" run 'Reply with exactly: pong' 2>&1 | tail -1)"
+case "$out" in
+*pong*) ok 'a real run answers through the wrapper' ;;
+*) bad 'a real run answers through the wrapper' "last line: $out" ;;
+esac
+
 # The image ships with zero credential material — checked directly, not behaviourally: opencode
 # answers prompts with no key at all through its own anonymous free tier, so "a run fails without
 # a credential" would be a false expectation here. What must never be true is a baked key.

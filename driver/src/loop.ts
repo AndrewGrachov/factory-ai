@@ -122,13 +122,21 @@ export function createLoop({ board, runner, config, log = () => {}, sleep = wait
         // one minted here rather than read back from the runner, and reported before the container
         // exists: the whole point is that the board holds the session for the attempt even if the
         // run dies before it produces a line of output.
-        const session = job.resumeSessionId
-            ? { id: job.resumeSessionId, resume: true }
-            : { id: randomUUID(), resume: false };
+        //
+        // Except under opencode, which gets null: it mints its own session ids and cannot adopt
+        // one, so there is nothing to mint, give or report — minting a uuid anyway would put a
+        // session on the board that the runner never used.
+        const session: RunSession | null =
+            config.cli === 'opencode'
+                ? null
+                : job.resumeSessionId
+                  ? { id: job.resumeSessionId, resume: true }
+                  : { id: randomUUID(), resume: false };
 
         // Only under Remote Control: a headless run registers no bridge, so looking for one would
-        // be forty `docker exec`s that can never find anything.
-        const watching = config.remoteControl ? watchRemote(job, session, state) : Promise.resolve();
+        // be forty `docker exec`s that can never find anything. (Remote Control is claude-code
+        // only — the config refuses the combination — and a claude-code job always has a session.)
+        const watching = config.remoteControl && session ? watchRemote(job, session, state) : Promise.resolve();
 
         const settle = async () => {
             state.finished = true;
@@ -139,9 +147,11 @@ export function createLoop({ board, runner, config, log = () => {}, sleep = wait
         try {
             log(
                 `job ${job.id}: attempt ${job.attempts} ` +
-                    `${session.resume ? 'resuming' : 'starting as'} session ${session.id}`,
+                    (session
+                        ? `${session.resume ? 'resuming' : 'starting as'} session ${session.id}`
+                        : 'starting (headless opencode run: no session id)'),
             );
-            if (!session.resume) {
+            if (session && !session.resume) {
                 try {
                     await board.session(job, session.id, null);
                 } catch (e) {
@@ -244,6 +254,29 @@ export function createLoop({ board, runner, config, log = () => {}, sleep = wait
                             exitCode: null,
                             output:
                                 'This job has no workspace. It was queued by an account this board cannot resolve a checkout directory for, or the board has no workspace root configured.',
+                        })
+                        .catch((e: Error) => log(`job ${job.id}: could not report the failure: ${e.message}`));
+                    continue;
+                }
+
+                /*
+                 * A parked job's session cannot follow it across a RUNNER_CLI flip.
+                 *
+                 * Standby is a Remote Control feature and opencode refuses Remote Control at
+                 * startup, so a claim carrying resumeSessionId under opencode means the operator
+                 * changed the CLI while a job was parked. Restoring it is impossible — opencode
+                 * cannot adopt a session id — and re-running the command would re-enter a
+                 * transcript somebody may have been driving by hand. Failed with a reason, so the
+                 * job reaches a terminal state somebody can act on.
+                 */
+                if (config.cli === 'opencode' && job.resumeSessionId) {
+                    log(`job ${job.id}: parked with a session this opencode driver cannot restore, failing`);
+                    await board
+                        .complete(job, {
+                            status: 'failed',
+                            exitCode: null,
+                            output:
+                                'This job was parked with an agent session by a claude-code driver, and this driver runs opencode, whose runner cannot restore that session. Re-queue the job to run it fresh.',
                         })
                         .catch((e: Error) => log(`job ${job.id}: could not report the failure: ${e.message}`));
                     continue;

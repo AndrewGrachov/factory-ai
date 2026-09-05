@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BoardJob } from '../src/board.js';
 import { loadDriverConfig } from '../src/config.js';
+import type { RunSession } from '../src/docker.js';
 import { containerName, dockerArgs, parseRemoteSessionId, remoteSessionArgs } from '../src/docker.js';
 
 const USER = '44444444-4444-4444-8444-444444444444';
@@ -18,8 +19,8 @@ const job: BoardJob = {
 
 const SESSION = '33333333-3333-4333-8333-333333333333';
 
-const args = (env: NodeJS.ProcessEnv = {}) =>
-    dockerArgs(loadDriverConfig(env), job, { id: SESSION, resume: false });
+const args = (env: NodeJS.ProcessEnv = {}, session: RunSession | null = { id: SESSION, resume: false }) =>
+    dockerArgs(loadDriverConfig(env), job, session);
 
 const resumed = (env: NodeJS.ProcessEnv = {}) =>
     dockerArgs(loadDriverConfig(env), job, { id: SESSION, resume: true });
@@ -205,5 +206,55 @@ describe('a Remote Control runner', () => {
     it('accepts the trust dialog for the mount', () => {
         expect(rc()).toEqual(expect.arrayContaining(['-e', 'TRUST_WORKDIR=1']));
         expect(args()).not.toContain('TRUST_WORKDIR=1');
+    });
+});
+
+describe('an opencode runner', () => {
+    const oc = (env: NodeJS.ProcessEnv = {}) => args({ RUNNER_CLI: 'opencode', ...env }, null);
+
+    // opencode's asymmetry, per the repo's own executor spec: `run --session <id>` CONTINUES an
+    // existing session, it cannot adopt one minted in advance. So the headless form is just
+    // `run <command>`, and no session id travels in either direction.
+    it('runs the command headless, with no session id at all', () => {
+        const line = oc();
+        expect(line.slice(-3)).toEqual(['opencode-executor', 'run', 'fix the failing build']);
+        expect(line).not.toContain('--session-id');
+        expect(line).not.toContain('--resume');
+        expect(line).not.toContain(SESSION);
+    });
+
+    it('keeps the explicit-image rule', () => {
+        expect(oc({ EXECUTOR_IMAGE: 'registry/oc:2' }).slice(-2)).toEqual([
+            'run',
+            'fix the failing build',
+        ]);
+    });
+
+    // The claude pins hold unchanged, because nothing about the docker-level posture depends on
+    // which CLI is behind the image: workspace, label, name, rm, and credentials by name only.
+    it('keeps every docker-level invariant', () => {
+        const line = oc({ RUNNER_ENV: 'ANTHROPIC_API_KEY' });
+        expect(line).toEqual(
+            expect.arrayContaining([
+                '--rm',
+                '--name',
+                containerName(job),
+                '--label',
+                `factory.job=${job.id}`,
+                '-v',
+                'factory-ai_workspaces:/workspaces',
+                `WORKDIR=/workspaces/bellows/${USER}`,
+                '-e',
+                'ANTHROPIC_API_KEY',
+            ]),
+        );
+        expect(line.some((arg) => arg.includes('ANTHROPIC_API_KEY='))).toBe(false);
+    });
+
+    // Standby is a Remote Control feature and opencode cannot be configured for it, so a resumed
+    // session here means board state from before a RUNNER_CLI flip. A silent wrong run is worse
+    // than a throw.
+    it('refuses to hand a session to a runner that cannot adopt one', () => {
+        expect(() => resumed({ RUNNER_CLI: 'opencode' })).toThrow(/session/);
     });
 });

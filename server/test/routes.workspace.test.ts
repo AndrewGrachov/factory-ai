@@ -308,6 +308,16 @@ describe('executors', () => {
         expect(response.json().code).toBe('BAD_EXECUTOR_TYPE');
     });
 
+    it('accepts an opencode executor', async () => {
+        const { app, cookie, executors } = await boot();
+        const response = await putExecutors(app, cookie, [
+            { name: 'oc', type: 'opencode', config: {} },
+        ]);
+
+        expect(response.statusCode).toBe(200);
+        expect(executors.rows()).toEqual([expect.objectContaining({ name: 'oc', type: 'opencode' })]);
+    });
+
     it('refuses a config that is not a JSON object', async () => {
         const { app, cookie } = await boot();
         for (const config of [[], 'text', 7, null]) {

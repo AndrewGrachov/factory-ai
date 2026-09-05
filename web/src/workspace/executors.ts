@@ -14,6 +14,7 @@ import type { ExecutorType } from '@factory-ai/core';
  */
 export const REQUIRED_FIELDS: Record<ExecutorType, readonly string[]> = {
     'claude-code': [],
+    opencode: [],
 };
 
 /** Half the 64 KiB body budget, so the serialized envelope cannot blow the server limit. */

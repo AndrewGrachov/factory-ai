@@ -177,7 +177,14 @@ services:
             # No ORG_ID. It only ever built the runner's WORKDIR as /workspaces/<org>, and the board
             # sends `workspacePath` on the claim now: checkouts are per member, so only the board —
             # which created the directory — knows where a given job's tree is.
-            EXECUTOR_IMAGE: ${EXECUTOR_IMAGE:-claude-executor}
+            # Empty by default on purpose: an explicit EXECUTOR_IMAGE reads as "operator knows
+            # better" and wins over everything, so the default has to come from RUNNER_CLI inside
+            # the driver — claude-executor, or opencode-executor under RUNNER_CLI=opencode. An
+            # image that does not speak RUNNER_CLI's dialect is a mismatch nothing guards against.
+            EXECUTOR_IMAGE: ${EXECUTOR_IMAGE:-}
+            # Which CLI the runner image speaks. Refused at startup alongside Remote Control and
+            # RUNNER_SKIP_PERMISSIONS — both are claude-code-only. See docs/jobs.md.
+            RUNNER_CLI: ${RUNNER_CLI:-claude-code}
             # A volume name as the daemon knows it, hence the compose project prefix. Override if
             # the project directory is not `factory-ai`.
             WORKSPACE_VOLUME: ${WORKSPACE_VOLUME:-factory-ai_workspaces}

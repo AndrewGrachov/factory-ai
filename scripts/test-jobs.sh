@@ -312,10 +312,10 @@ api POST "/api/jobs/$park_id/complete" \
 echo
 echo '# driver'
 
-start_driver() { # start_driver <image>
+start_driver() { # start_driver <image> [RUNNER_CLI]
     # No ORG_ID. The board sends `workspacePath` on the claim now — it owns the layout, because it
     # is the thing that created the directory — so the driver builds no path of its own.
-    env JOB_BOARD_URL="$BASE" EXECUTOR_IMAGE="$1" WORKSPACE_VOLUME="$VOLUME" \
+    env JOB_BOARD_URL="$BASE" EXECUTOR_IMAGE="$1" RUNNER_CLI="${2:-claude-code}" WORKSPACE_VOLUME="$VOLUME" \
         DRIVER_POLL_MS=500 DRIVER_CONCURRENCY=2 DRIVER_LEASE_SECONDS=60 \
         node driver/dist/index.js >>"$work/driver.log" 2>&1 &
     driver_pid=$!
@@ -363,6 +363,18 @@ expect_contains 'a non-zero exit is a failure' "$(await_settled "$failing")" fai
 failed_body="$(body "$(api GET "/api/jobs/$failing")")"
 expect_field    'the exit code is reported'    "$failed_body" exitCode 3
 expect_contains 'stderr is captured'           "$(field "$failed_body" output)" boom
+
+stop_driver
+start_driver "$IMAGE_OK" opencode
+
+# The opencode switch, end to end: same stub image (its entrypoint echoes, so the output is the
+# argv the container received), but the driver now speaks opencode's headless form — `run <prompt>`
+# — and, because opencode cannot adopt a minted session id, reports no session at all.
+oc="$(create_job 'opencode prompt')"
+expect_contains 'an opencode driver runs its job' "$(await_settled "$oc")" succeeded
+oc_body="$(body "$(api GET "/api/jobs/$oc")")"
+expect_contains 'the opencode argv reached it' "$(field "$oc_body" output)" 'run opencode prompt'
+expect_field    'no session was reported'      "$oc_body" sessionId ''
 
 stop_driver
 
